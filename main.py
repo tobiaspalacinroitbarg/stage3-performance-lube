@@ -18,6 +18,8 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from loguru import logger
 from dotenv import load_dotenv
+import schedule
+import argparse
 
 # Cargar variables de entorno
 load_dotenv()
@@ -28,7 +30,7 @@ class ScrapingConfig:
     base_url: str = "https://www.prautopartes.com.ar/"
     catalog_url: str = "https://www.prautopartes.com.ar/catalogo"
     api_url: str = "https://www.prautopartes.com.ar/api/Articulos/Buscar"
-    output_dir: str = "."  # Carpeta base del proyecto
+    output_dir: str = "./output"  # Carpeta base del proyecto
     page_timeout: int = 10
     request_delay: float = 0.5
     window_size: str = "1920,1080"
@@ -389,9 +391,45 @@ class PrAutoParteScraper:
 
 def main():
     """Función principal"""
+    logger.info("Iniciando PrAutoParte Scraper...")
     config = ScrapingConfig()
     scraper = PrAutoParteScraper(config)
     scraper.run()
 
-if __name__ == "__main__":
+def run_scheduler():
+    """Ejecutar el scraper cada 4 horas"""
+
+    logger.info("Iniciando scheduler - ejecutará cada 4 horas")
+
+    # Programar ejecución cada 4 horas
+    schedule.every(4).hours.do(main)
+    
+    # Ejecutar inmediatamente al inicio
+    logger.info("Ejecutando primera vez...")
     main()
+
+    # Loop principal del scheduler
+    while True:
+        schedule.run_pending()
+        time.sleep(600)  # Verificar cada 10 minutos
+
+def main_cli():
+    """Función para manejar argumentos de línea de comandos"""
+    
+    parser = argparse.ArgumentParser(description='PrAutoParte Scraper')
+    parser.add_argument('--once', action='store_true', 
+                       help='Ejecutar una sola vez en lugar del scheduler')
+    parser.add_argument('--schedule', action='store_true', 
+                       help='Ejecutar con scheduler cada 4 horas (por defecto)')
+    
+    args = parser.parse_args()
+    
+    if args.once:
+        logger.info("Modo ejecución única")
+        main()
+    else:
+        logger.info("Modo scheduler (cada 4 horas)")
+        run_scheduler()
+
+if __name__ == "__main__":
+    main_cli()

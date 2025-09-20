@@ -5,3 +5,4 @@ webdriver-manager==4.0.1
 loguru==0.7.2
 pandas==2.0.3
 pywin32==306; sys_platform == "win32"
+schedule==1.2.0 
