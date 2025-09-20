@@ -1,0 +1,7 @@
+requests==2.31.0
+selenium==4.15.2
+python-dotenv==1.0.0
+webdriver-manager==4.0.1
+loguru==0.7.2
+pandas==2.0.3
+pywin32==306; sys_platform == "win32"
