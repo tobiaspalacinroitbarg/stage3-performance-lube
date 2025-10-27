@@ -1,4 +1,8 @@
-# Python
+# =================================================================================
+# PrAutoParte Scraper - .gitignore Profesional
+# =================================================================================
+
+# ===== PYTHON =====
 __pycache__/
 *.py[cod]
 *$py.class
@@ -21,35 +25,129 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
+# ===== VIRTUAL ENVIRONMENT =====
 venv/
 env/
 ENV/
+.venv/
+.env.local
+.env.*.local
 
-# Environment Variables
+# ===== ENVIRONMENT VARIABLES =====
 .env
+.env.production
+.env.development
+.env.local
+config/secrets/
 
-# Logs
+# ===== LOGS =====
 logs/
 *.log
+logs_*.log
+*.log.*
+pm2-logs/
+log/
 
-# Output Files CSV con fechas
+# ===== OUTPUT FILES =====
 articulos_*.csv
 output/
 *.csv
+*.xlsx
+*.json
+data/
+export/
 
-# IDE
+# ===== CHROME/CHROMEDRIVER =====
+geckodriver.log
+chromedriver.log
+chromedriver*
+*.chromedriver
+chrome_debug.log
+chrome_driver.log
+
+# ===== CONFIGURACIÓN DE PM2 =====
+.pm2/
+.pm2.dump
+ecosystem.config.local.js
+pm2_home/
+pm2-logs/
+
+# ===== IDE Y EDITORES =====
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.netrwhist
+.cache/
+.venv*/
+sublime-*/
+sublime-workspace/
 
-# OS
+# ===== SISTEMAS OPERATIVOS =====
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+*.tmp
+*.temp
 
-# Selenium
-geckodriver.log
+# ===== BACKUPS =====
+backup_*
+*_backup.*
+.bak
+*.backup
+*.old
+*.orig
 
-# Docker
+# ===== DOCKER =====
 .dockerignore
+.docker-compose.override.yml
+.docker-compose.prod.yml
+docker-compose.override.yml
+
+# ===== WEBDRIVER MANAGER =====
+.wdm/
+webdriver-manager/
+
+# ===== DEPLOYMENT =====
+deployment/
+deploy/
+production/
+staging/
+
+# ===== CONFIGURACIÓN ESPECÍFICA =====
+.local/
+config/local_settings.py
+settings_local.py
+user_config.json
+
+# ===== TEMPORALES =====
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+.cache/
+
+# ===== ARCHIVOS COMPRIMIDOS =====
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ===== OTROS =====
+.env.secure
+credentials.json
+*.key
+*.pem
+*.crt
+*.p12
+
+# ===== PM2 LOGS ESPECÍFICOS =====
+err.log
+out.log
+combined.log
