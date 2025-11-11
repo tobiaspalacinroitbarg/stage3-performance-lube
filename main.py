@@ -368,68 +368,139 @@ class OdooConnector:
             return {"success": False, "error": str(e)}
 
     def _update_replenishment_rule(self, product_id: int) -> Dict:
-        """Establecer regla de reposición en '-35' para el producto"""
+        """Establecer regla de reposición en '-35' para el producto con debugging mejorado"""
         try:
             # Obtener el template_id del producto
             product_info = self.models.execute_kw(
                 self.db, self.uid, self.password,
                 'product.product', 'read',
                 [[product_id]],
-                {'fields': ['product_tmpl_id']}
+                {'fields': ['product_tmpl_id', 'default_code', 'name']}
             )
 
             if not product_info:
                 return {"success": False, "error": "No se pudo obtener información del producto"}
 
             template_id = product_info[0]['product_tmpl_id'][0]
+            product_code = product_info[0].get('default_code', 'N/A')
+            product_name = product_info[0].get('name', 'N/A')
 
-            # Buscar reglas de reabastecimiento existentes para este producto
+            logger.info(f"🔍 Analizando regla de reposición para producto: {product_code} - {product_name[:30]}...")
+            logger.info(f"📋 Template ID: {template_id} | Product ID: {product_id}")
+
+            # Búsqueda más amplia de reglas existentes para debugging
             existing_rules = self.models.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.warehouse.orderpoint', 'search_read',
                 [[['product_tmpl_id', '=', template_id]]],
-                {'fields': ['id', 'product_min_qty', 'product_max_qty']}
+                {'fields': ['id', 'product_min_qty', 'product_max_qty', 'location_id', 'warehouse_id']}
             )
 
-            if existing_rules:
-                # Actualizar regla existente
-                rule_id = existing_rules[0]['id']
-                self.models.execute_kw(
+            # También buscar reglas por product_id (alternativa)
+            rules_by_product = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.warehouse.orderpoint', 'search_read',
+                [[['product_id', '=', product_id]]],
+                {'fields': ['id', 'product_min_qty', 'product_max_qty', 'location_id', 'warehouse_id']}
+            )
+
+            logger.info(f"🔎 Reglas encontradas por template_id: {len(existing_rules)}")
+            logger.info(f"🔎 Reglas encontradas por product_id: {len(rules_by_product)}")
+
+            # Combinar reglas encontradas
+            all_rules = existing_rules + rules_by_product
+
+            # Eliminar duplicados por ID
+            unique_rules = {}
+            for rule in all_rules:
+                if rule['id'] not in unique_rules:
+                    unique_rules[rule['id']] = rule
+
+            all_unique_rules = list(unique_rules.values())
+            logger.info(f"📊 Total reglas únicas encontradas: {len(all_unique_rules)}")
+
+            if all_unique_rules:
+                # Actualizar la primera regla encontrada
+                rule_id = all_unique_rules[0]['id']
+                old_min = all_unique_rules[0].get('product_min_qty', 'N/A')
+                old_max = all_unique_rules[0].get('product_max_qty', 'N/A')
+                location_id = all_unique_rules[0].get('location_id', ['N/A'])[0]
+
+                logger.info(f"🔄 Actualizando regla existente ID:{rule_id}")
+                logger.info(f"📈 Valores anteriores: Min={old_min}, Max={old_max}, Location={location_id}")
+                logger.info(f"📈 Nuevos valores: Min=-35, Max=-34")
+
+                update_result = self.models.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.warehouse.orderpoint', 'write',
                     [[rule_id], {
                         'product_min_qty': -35,
-                        'product_max_qty': -34  # Un poco más alto que el mínimo
+                        'product_max_qty': -34
                     }]
                 )
-                logger.info(f"📊 Regla de reposición actualizada: {rule_id} - Mínimo: -35")
+
+                if update_result:
+                    logger.info(f"✅ Regla de reposición actualizada exitosamente: {rule_id}")
+                    return {"success": True, "action": "updated", "rule_id": rule_id, "min_qty": -35}
+                else:
+                    logger.error(f"❌ Error al actualizar regla: {rule_id}")
+                    return {"success": False, "error": "Error al actualizar regla existente"}
             else:
                 # Crear nueva regla de reposición
+                logger.info(f"➕ No se encontraron reglas existentes, creando nueva regla...")
+
                 # Buscar almacén Scraping para asociarlo a la regla
                 scraping_location_id = self._get_scraping_location()
                 if not scraping_location_id:
-                    return {"success": False, "error": "No se puede crear regla sin almacén Scraping"}
+                    logger.error(f"❌ No se encontró almacén 'Scraping'")
+                    # Intentar con un almacén por defecto
+                    logger.info(f"🔄 Intentando con almacén por defecto...")
+                    default_locations = self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'stock.location', 'search_read',
+                        [[['usage', '=', 'internal'], ['scrap_location', '=', False]]],
+                        {'fields': ['id', 'name'], 'limit': 1}
+                    )
+                    if default_locations:
+                        scraping_location_id = default_locations[0]['id']
+                        logger.info(f"✅ Usando almacén por defecto: {default_locations[0]['name']} (ID: {scraping_location_id})")
+                    else:
+                        return {"success": False, "error": "No se pudo encontrar ningún almacén interno"}
+
+                logger.info(f"🏭 Usando almacén ID: {scraping_location_id}")
+
+                new_rule_data = {
+                    'product_tmpl_id': template_id,
+                    'product_id': product_id,
+                    'location_id': scraping_location_id,
+                    'product_min_qty': -35,
+                    'product_max_qty': -34,
+                    'qty_multiple': 1,
+                    'name': f"Rule {product_code} - Scraping"
+                }
+
+                logger.info(f"📝 Datos de nueva regla: {new_rule_data}")
 
                 rule_id = self.models.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.warehouse.orderpoint', 'create',
-                    [{
-                        'product_tmpl_id': template_id,
-                        'product_id': product_id,  # Agregar campo product_id obligatorio
-                        'location_id': scraping_location_id,
-                        'product_min_qty': -35,
-                        'product_max_qty': -34,
-                        'qty_multiple': 1,
-                        'name': f"Rule {template_id} - Scraping"
-                    }]
+                    [new_rule_data]
                 )
-                logger.info(f"📊 Regla de reposición creada: {rule_id} - Mínimo: -35")
 
-            return {"success": True, "rule_value": -35}
+                if rule_id:
+                    logger.info(f"✅ Regla de reposición creada exitosamente: {rule_id} - Mínimo: -35")
+                    return {"success": True, "action": "created", "rule_id": rule_id, "min_qty": -35}
+                else:
+                    logger.error(f"❌ Error al crear regla de reposición")
+                    return {"success": False, "error": "Error al crear nueva regla"}
 
         except Exception as e:
-            logger.error(f"Error al actualizar regla de reposición: {e}")
-            return {"success": False, "error": str(e)}
+            error_msg = str(e)
+            logger.error(f"❌ Error al actualizar regla de reposición: {error_msg}")
+            # Log del stack trace completo para debugging
+            import traceback
+            logger.error(f"📋 Stack trace: {traceback.format_exc()}")
+            return {"success": False, "error": error_msg}
 
     def _update_purchase_info(self, product_id: int, product_data: Dict) -> Dict:
         """Actualizar información de compra con proveedor 'PR Autopartes (Scraping)'"""
@@ -1295,43 +1366,18 @@ class PrAutoParteScraper:
             return self.odoo_connector.connect()
         return True
     
-    def _process_single_product_parallel(self, product_code: str, headers: Dict) -> Dict:
-        """Procesar un solo producto en paralelo"""
+    def _process_matched_product_from_data(self, product_code: str, scraped_data: Dict) -> Dict:
+        """Procesar un producto coincidente usando datos ya scrapeados (sin nueva petición)"""
         try:
-            # Crear payload específico para buscar por código
-            payload = json.dumps({
-                "idMarcas": 0,
-                "idRubros": 0,
-                "busqueda": product_code,
-                "pagina": 1,
-                "isNovedades": False,
-                "isOfertas": False,
-                "equivalencia": ""
-            })
-
-            response = self.session.post(
-                self.config.api_url,
-                headers=headers,
-                data=payload,
-                timeout=self.config.page_timeout
-            )
-            response.raise_for_status()
-
-            data = response.json()
-            items = data.get("items", [])
-
-            if not items:
-                return {"success": False, "error": f"Producto {product_code} no encontrado en API", "code": product_code}
-
-            # Buscar el producto exacto por código
+            # Buscar el producto en los datos ya scrapeados
             found_product = None
-            for item in items:
+            for item in scraped_data.get("items", []):
                 if item.get("codigo") == product_code:
                     found_product = item
                     break
 
             if not found_product:
-                return {"success": False, "error": f"Producto {product_code} no coincide exactamente", "code": product_code}
+                return {"success": False, "error": f"Producto {product_code} no encontrado en datos scrapeados", "code": product_code}
 
             # Extraer datos del producto encontrado
             extracted_data = self._extract_item_data(found_product)
@@ -1343,19 +1389,14 @@ class PrAutoParteScraper:
                 "description": extracted_data.get('descripcion', '')[:50]
             }
 
-        except requests.exceptions.Timeout as e:
-            return {"success": False, "error": f"Timeout buscando producto {product_code}: {e}", "code": product_code}
-        except requests.exceptions.ConnectionError as e:
-            return {"success": False, "error": f"Error de conexión buscando producto {product_code}: {e}", "code": product_code}
         except Exception as e:
-            return {"success": False, "error": f"Error inesperado procesando producto {product_code}: {e}", "code": product_code}
+            return {"success": False, "error": f"Error procesando producto {product_code}: {e}", "code": product_code}
 
-    def scrape_matched_products(self, bearer_token: str) -> None:
-        """Realizar scraping optimizado y paralelo solo de productos coincidentes"""
-        logger.info(f"🚀 Iniciando scraping optimizado y paralelo de {len(self.matched_codes)} productos coincidentes...")
+    def process_matched_products_optimized(self, scraped_products_data: Dict) -> None:
+        """Procesar productos coincidentes usando datos ya scrapeados (SIN nuevo scraping)"""
+        logger.info(f"🚀 Procesando {len(self.matched_codes)} productos coincidentes SIN nuevo scraping...")
 
         # Configuración inicial
-        headers = self._get_request_headers(bearer_token)
         total_items = 0
         successful_products = 0
         failed_products = 0
@@ -1367,49 +1408,24 @@ class PrAutoParteScraper:
             logger.info("🔌 Verificando conexión con Odoo...")
             odoo_connected = self._connect_to_odoo()
             if not odoo_connected:
-                logger.warning("⚠️ No se pudo conectar a Odoo. Continuando solo con CSV.")
+                logger.warning("⚠️ No se pudo conectar a Odoo. Continuando solo con análisis.")
                 self.config.send_to_odoo = False
 
-        # Preparar CSV (siempre se crea)
-        fields = [
-            "id", "codigo", "marca", "descripcion", "precioLista", "precioCosto",
-            "precioVenta", "descuentos", "disponibilidad", "origen", "fotos"
-        ]
-        output_path = self.config.get_output_path()
-
-        # Thread lock para escritura CSV segura
-        csv_lock = threading.Lock()
-
         try:
-            # Verificar y manejar archivo existente
-            if output_path.exists():
-                backup_path = output_path.with_suffix('.backup.csv')
-                import shutil
-                shutil.copy2(output_path, backup_path)
-                logger.info(f"📄 Archivo existente respaldado como: {backup_path.name}")
-
-            # Abrir archivo CSV
-            f = open(output_path, "w", newline="", encoding="utf-8")
-            writer = csv.DictWriter(f, fieldnames=fields)
-            writer.writeheader()
-
-            logger.info(f"📄 Datos guardando en: {output_path.absolute()}")
-
             logger.info(f"⚙️  Configuración optimizada:")
             logger.info(f"   🎯 Objetivo: {len(self.matched_codes)} productos coincidentes")
-            logger.info(f"   ⏱️  Retraso entre peticiones: {self.config.request_delay}s")
-            logger.info(f"   ⌛ Timeout de página: {self.config.page_timeout}s")
-            logger.info(f"   🔢 Workers paralelos: {self.config.max_workers}")
+            logger.info(f"   📊 Datos scrapeados: {len(scraped_products_data.get('items', []))} productos")
+            logger.info(f"   🚀 SIN nuevas peticiones a PR Autopartes")
             logger.info(f"   🌐 Integración Odoo: {'✅ Activa' if odoo_connected else '❌ Inactiva'}")
 
-            # Convertir códigos a lista para procesamiento
+            # Convertir códigos coincidentes a lista
             matched_codes_list = list(self.matched_codes)
 
-            # Procesamiento por lotes con ThreadPoolExecutor
+            # Procesamiento por lotes con ThreadPoolExecutor (solo para Odoo)
             with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-                # Enviar todas las búsquedas en paralelo
+                # Preparar futuros para productos coincidentes
                 future_to_code = {
-                    executor.submit(self._process_single_product_parallel, code, headers): code
+                    executor.submit(self._process_matched_product_from_data, code, scraped_products_data): code
                     for code in matched_codes_list
                 }
 
@@ -1418,14 +1434,9 @@ class PrAutoParteScraper:
                     result = future.result()
 
                     if result["success"]:
-                        # Escribir en CSV de forma thread-safe
-                        with csv_lock:
-                            writer.writerow(result["data"])
-                            f.flush()  # Forzar escritura inmediata
-                            total_items += 1
-                            successful_products += 1
-
-                        logger.info(f"✅ Producto encontrado: {result['code']} - {result['description']}...")
+                        total_items += 1
+                        successful_products += 1
+                        logger.info(f"✅ Producto procesado: {result['code']} - {result['description']}...")
 
                         # Enviar a Odoo inmediatamente si está conectado
                         if self.config.send_to_odoo and odoo_connected:
@@ -1438,23 +1449,22 @@ class PrAutoParteScraper:
                         failed_products += 1
                         logger.error(f"❌ {result['error']}")
 
-                    # Pequeña pausa para no sobrecargar el servidor
-                    time.sleep(self.config.request_delay / self.config.max_workers)
+                    # Pequeña pausa para no sobrecargar Odoo
+                    time.sleep(0.1)
 
             # Estadísticas finales
             end_time = datetime.now()
             duration = end_time - start_time
             success_rate = (successful_products / len(self.matched_codes)) * 100 if self.matched_codes else 0
 
-            logger.info("🎉 Scraping optimizado y paralelo completado!")
+            logger.info("🎉 Procesamiento optimizado completado!")
             logger.info(f"   🎯 Productos coincidentes: {len(self.matched_codes)}")
-            logger.info(f"   ✅ Productos exitosos: {successful_products}")
+            logger.info(f"   ✅ Productos procesados: {successful_products}")
             logger.info(f"   ❌ Productos fallidos: {failed_products}")
             logger.info(f"   📈 Tasa éxito: {success_rate:.1f}%")
             logger.info(f"   ⏱️  Tiempo total: {duration}")
             logger.info(f"   🚀 Velocidad: {successful_products/duration.total_seconds():.2f} productos/segundo")
-            logger.info(f"   📄 Archivo CSV: {output_path.name}")
-            logger.info(f"   📁 Ubicación: {output_path.absolute()}")
+            logger.info(f"   🔥 AHORRO: {len(self.matched_codes)} peticiones HTTP evitadas")
 
             if self.config.send_to_odoo and odoo_connected:
                 logger.info(f"   🌐 Datos enviados a Odoo con nueva lógica (stock + compra + reposición)")
@@ -1464,16 +1474,9 @@ class PrAutoParteScraper:
         except Exception as e:
             logger.error(f"❌ Error crítico durante el proceso: {e}")
             raise
-        finally:
-            # Asegurar cierre del archivo CSV
-            try:
-                f.close()
-                logger.info(f"📄 Archivo CSV cerrado: {output_path.absolute()}")
-            except:
-                logger.error("❌ Error al cerrar archivo CSV")
 
-    def scrape_products(self, num_pages: int, bearer_token: str) -> None:
-        """Realizar scraping completo de productos solo para generar dataset (sin procesar Odoo)"""
+    def scrape_products_and_collect_data(self, num_pages: int, bearer_token: str) -> Dict:
+        """Realizar scraping completo de productos y retornar datos para procesamiento de coincidencias"""
         logger.info(f"📡 Iniciando scraping completo de {num_pages} páginas para generar dataset...")
 
         # Configuración inicial
@@ -1482,6 +1485,9 @@ class PrAutoParteScraper:
         successful_pages = 0
         failed_pages = 0
         start_time = datetime.now()
+
+        # Recolector de datos para coincidencias
+        all_scraped_items = []
 
         # Preparar CSV (siempre se crea)
         fields = [
@@ -1509,7 +1515,7 @@ class PrAutoParteScraper:
             logger.info(f"   📄 Páginas totales: {num_pages-1}")
             logger.info(f"   ⏱️  Retraso entre peticiones: {self.config.request_delay}s")
             logger.info(f"   ⌛ Timeout de página: {self.config.page_timeout}s")
-            logger.info(f"   🎯 Objetivo: Generar dataset para análisis de coincidencias")
+            logger.info(f"   🎯 Objetivo: Generar dataset + recolectar datos para coincidencias")
 
             # Procesamiento de páginas
             for page in range(1, num_pages):
@@ -1535,7 +1541,7 @@ class PrAutoParteScraper:
                         logger.warning(f"⚠️ Página {page} no contiene items")
                         continue
 
-                    # Procesar items de la página (solo guardar en CSV)
+                    # Procesar items de la página (guardar en CSV y recolectar)
                     page_items_processed = 0
                     for item in items:
                         try:
@@ -1546,10 +1552,13 @@ class PrAutoParteScraper:
                                 logger.warning(f"⚠️ Item sin código omitido: {extracted_data.get('id', 'N/A')}")
                                 continue
 
-                            # Escribir siempre en CSV
+                            # Escribir en CSV
                             writer.writerow(extracted_data)
                             total_items += 1
                             page_items_processed += 1
+
+                            # Recolectar para procesamiento de coincidencias
+                            all_scraped_items.append(item)
 
                         except Exception as e:
                             logger.error(f"❌ Error procesando item en página {page}: {e}")
@@ -1595,10 +1604,20 @@ class PrAutoParteScraper:
             logger.info(f"   📄 Dataset CSV: {output_path.name}")
             logger.info(f"   📁 Ubicación: {output_path.absolute()}")
             logger.info(f"   🔍 Listo para análisis de coincidencias")
+            logger.info(f"   📦 Items recolectados: {len(all_scraped_items)}")
+
+            # Retornar datos recolectados para procesamiento de coincidencias
+            return {
+                "success": True,
+                "items": all_scraped_items,
+                "total_items": total_items,
+                "csv_path": output_path,
+                "processing_time": duration
+            }
 
         except Exception as e:
             logger.error(f"❌ Error crítico durante el proceso: {e}")
-            raise
+            return {"success": False, "error": str(e)}
         finally:
             # Asegurar cierre del archivo CSV
             try:
@@ -1608,7 +1627,7 @@ class PrAutoParteScraper:
                 logger.error("❌ Error al cerrar archivo CSV")
 
     def run(self) -> None:
-        """Ejecutar el proceso completo de scraping optimizado"""
+        """Ejecutar el proceso completo de scraping optimizado (SIN doble scraping)"""
         try:
             logger.info("Iniciando PrAutoParte Scraper Optimizado...")
 
@@ -1616,9 +1635,14 @@ class PrAutoParteScraper:
             logger.info("🔑 Obteniendo credenciales de sesión...")
             num_pages, bearer_token = self.login_and_get_session_data()
 
-            # 2. Ejecutar scraping completo para generar dataset actualizado
-            logger.info("📡 Ejecutando scraping completo para generar dataset actualizado...")
-            self.scrape_products(num_pages, bearer_token)
+            # 2. Ejecutar scraping completo Y recolectar datos para coincidencias
+            logger.info("📡 Ejecutando scraping completo y recolectando datos...")
+            scraping_result = self.scrape_products_and_collect_data(num_pages, bearer_token)
+
+            # Verificar que el scraping fue exitoso
+            if not scraping_result.get("success"):
+                logger.error(f"❌ El scraping falló: {scraping_result.get('error')}")
+                return
 
             # 3. Ahora que tenemos el scraping actualizado, cargar coincidencias
             logger.info("🔍 Analizando coincidencias con datos actualizados...")
@@ -1632,8 +1656,8 @@ class PrAutoParteScraper:
 
             logger.info(f"🎯 Modo optimizado: Se procesarán {len(self.matched_codes)} productos coincidentes")
 
-            # 5. Procesar solo los productos coincidentes con nueva lógica
-            self.scrape_matched_products(bearer_token)
+            # 5. Procesar coincidencias usando datos YA SCRAPEADOS (SIN nuevo scraping)
+            self.process_matched_products_optimized(scraping_result)
 
             logger.info("Proceso optimizado completado exitosamente")
 
