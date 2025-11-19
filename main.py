@@ -29,9 +29,32 @@ import argparse
 # Cargar variables de entorno
 load_dotenv()
 
+class CodeNormalizer:
+    """Utilidad estática para normalizar códigos de productos"""
+
+    @staticmethod
+    def normalize_code(code: str) -> str:
+        """Normalizar código de producto para matching robusto"""
+        if not code or pd.isna(code):
+            return ""
+
+        # Convertir a string y limpiar
+        code_str = str(code).strip()
+
+        # Eliminar espacios extras y normalizar
+        code_str = ' '.join(code_str.split())  # Eliminar espacios dobles
+        code_str = code_str.upper()  # Convertir a mayúsculas para matching insensible a mayúsculas
+
+        # Eliminar caracteres problemáticos comunes en códigos
+        chars_to_remove = ['.', '-', '_', '/', '(', ')', '[', ']', ' ']
+        for char in chars_to_remove:
+            code_str = code_str.replace(char, '')
+
+        return code_str.strip()
+
 @dataclass
 class ScrapingConfig:
-    """Configuración del scraper profesional para producción"""
+    """Configuración del scraper para producción"""
 
     # URLs del sistema
     base_url: str = "https://www.prautopartes.com.ar/"
@@ -50,11 +73,10 @@ class ScrapingConfig:
     send_to_odoo: bool = os.getenv("SEND_TO_ODOO", "false").lower() == "true"
 
     # Configuración de rendimiento
-    page_timeout: int = int(os.getenv("PAGE_TIMEOUT", "15"))  # Timeout más generoso para evitar timeouts
-    request_delay: float = float(os.getenv("REQUEST_DELAY", "0.2"))  # Reducido de 0.5 a 0.2 para mayor velocidad
+    page_timeout: int = int(os.getenv("PAGE_TIMEOUT", "15"))  
+    request_delay: float = float(os.getenv("REQUEST_DELAY", "0.2")) 
     window_size: str = "1920,1080"
-    batch_size: int = int(os.getenv("BATCH_SIZE", "20"))  # Incrementado para procesar más productos en lote
-    max_workers: int = int(os.getenv("MAX_WORKERS", "3"))  # Para procesamiento paralelo
+    max_workers: int = int(os.getenv("MAX_WORKERS", "1")) 
 
     # Configuración de logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
@@ -120,7 +142,7 @@ class OdooConnector:
             return False
 
     def search_product_by_code(self, product_code: str) -> Optional[int]:
-        """Buscar producto por código con matching mejorado (exacto y normalizado)"""
+        """Buscar producto por código solo con coincidencias exactas y normalizadas (sin like)"""
         if not self.models:
             return None
 
@@ -139,8 +161,7 @@ class OdooConnector:
 
             # 2. Si no encuentra coincidencia exacta, buscar versión normalizada
             # Normalizar el código de búsqueda
-            scraper = PrAutoParteScraper(ScrapingConfig())
-            normalized_code = scraper._normalize_code(product_code)
+            normalized_code = CodeNormalizer.normalize_code(product_code)
 
             # Obtener todos los productos con códigos (para matching normalizado)
             all_products = self.models.execute_kw(
@@ -154,24 +175,10 @@ class OdooConnector:
             for product in all_products:
                 odoo_code = str(product.get('default_code', '')).strip()
                 if odoo_code:
-                    normalized_odoo_code = scraper._normalize_code(odoo_code)
+                    normalized_odoo_code = CodeNormalizer.normalize_code(odoo_code)
                     if normalized_code and normalized_odoo_code and normalized_code == normalized_odoo_code:
                         logger.info(f"Producto encontrado (normalizado): {product_code} -> {odoo_code} (ID: {product['id']})")
                         return product['id']
-
-            # 3. Búsqueda con like como fallback
-            product_ids_like = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                'product.product', 'search_read',
-                [[['default_code', 'like', f'%{product_code}%']]],
-                {'fields': ['id', 'default_code'], 'limit': 5}
-            )
-
-            if product_ids_like:
-                # Si hay coincidencias parciales, mostrarlas pero no usarlas automáticamente
-                logger.warning(f"⚠️ Coincidencias parciales encontradas para {product_code}:")
-                for product in product_ids_like:
-                    logger.warning(f"   - {product.get('default_code')} (ID: {product['id']})")
 
             logger.info(f"Producto no encontrado: {product_code}")
             return None
@@ -180,68 +187,10 @@ class OdooConnector:
             logger.error(f"Error al buscar producto {product_code}: {e}")
             return None
 
-    def create_or_update_product(self, product_data: Dict) -> Dict:
-        """Crear o actualizar producto en Odoo"""
-        if not self.models:
-            return {"success": False, "error": "No conectado a Odoo"}
-
-        try:
-            # Mapear campos del scraper a Odoo
-            odoo_product = {
-                'default_code': product_data.get('codigo', ''),
-                'name': product_data.get('descripcion', ''),
-                'list_price': float(product_data.get('precioLista', 0)),
-                'standard_price': float(product_data.get('precioCosto', 0)),
-                'type': 'product',
-                'sale_ok': True,
-                'purchase_ok': True,
-            }
-
-            # Buscar categoría por marca
-            if product_data.get('marca'):
-                category_id = self._get_or_create_category(product_data['marca'])
-                if category_id:
-                    odoo_product['categ_id'] = category_id
-
-            # Buscar si el producto ya existe
-            existing_product_id = self.search_product_by_code(product_data.get('codigo', ''))
-
-            if existing_product_id:
-                # Actualizar producto existente
-                logger.info(f"Actualizando producto: {product_data.get('codigo')}")
-                self.models.execute_kw(
-                    self.db, self.uid, self.password,
-                    'product.product', 'write',
-                    [[existing_product_id], odoo_product]
-                )
-                return {
-                    "success": True,
-                    "action": "updated",
-                    "product_id": existing_product_id,
-                    "product_code": product_data.get('codigo')
-                }
-            else:
-                # Crear nuevo producto
-                logger.info(f"Creando nuevo producto: {product_data.get('codigo')}")
-                product_id = self.models.execute_kw(
-                    self.db, self.uid, self.password,
-                    'product.product', 'create',
-                    [odoo_product]
-                )
-                return {
-                    "success": True,
-                    "action": "created",
-                    "product_id": product_id,
-                    "product_code": product_data.get('codigo')
-                }
-
-        except Exception as e:
-            logger.error(f"Error al crear/actualizar producto: {e}")
-            return {"success": False, "error": str(e)}
-
+  
     def update_matched_product(self, product_data: Dict) -> Dict:
         """Actualizar producto coincidente con nueva lógica:
-        1. Cargar stock en almacén 'Scraping' (siempre, incluso si es 0)
+        1. Cargar stock en ubicación VLANTE/Scraping (siempre, incluso si es 0)
         2. Actualizar info de compra con proveedor 'PR Autopartes (Scraping)'
         3. Establecer regla de reposición en '-35'
         NOTA: No se modifica precioLista (list_price) para mantener precio de venta original
@@ -258,7 +207,7 @@ class OdooConnector:
 
             logger.info(f"🔄 Actualizando producto coincidente: {product_code} (ID: {existing_product_id})")
 
-            # 1. Cargar stock en almacén 'Scraping' (siempre, incluso si es 0)
+            # 1. Cargar stock en ubicación VLANTE/Scraping (siempre, incluso si es 0)
             scraping_stock_result = self._update_scraping_stock(existing_product_id, product_data)
 
             # 2. Actualizar información de compra
@@ -282,18 +231,18 @@ class OdooConnector:
             return {"success": False, "error": str(e)}
 
     def _update_scraping_stock(self, product_id: int, product_data: Dict) -> Dict:
-        """Actualizar stock del producto en almacén 'Scraping' (siempre, incluso si es 0)"""
+        """Actualizar stock del producto en ubicación VLANT/Scraping (siempre, incluso si es 0)"""
         try:
-            # Buscar almacén 'Scraping'
-            scraping_location_id = self._get_scraping_location()
-            if not scraping_location_id:
-                return {"success": False, "error": "Almacén 'Scraping' no encontrado"}
+            # Buscar ubicación VLANT/Scraping
+            vlante_scraping_location_id = self._get_scraping_location()
+            if not vlante_scraping_location_id:
+                return {"success": False, "error": "Ubicación VLANT/Scraping no encontrada"}
 
             # Obtener disponibilidad del producto (ahora siempre procesamos el valor)
             disponibilidad = product_data.get('disponibilidad', 0)
             stock_quantity = int(disponibilidad) if disponibilidad else 0
 
-            logger.info(f"📦 Actualizando stock en almacén Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
+            logger.info(f"📦 Actualizando stock en VLANTE/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
 
             # Verificar si el producto es un kit antes de intentar actualizar stock
             try:
@@ -325,11 +274,11 @@ class OdooConnector:
 
             # Siempre actualizar o crear inventario (incluso si stock_quantity es 0)
 
-            # Buscar si ya existe un registro de inventario para este producto en este almacén
+            # Buscar si ya existe un registro de inventario para este producto en esta ubicación
             existing_quants = self.models.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.quant', 'search_read',
-                [[['product_id', '=', product_id], ['location_id', '=', scraping_location_id]]],
+                [[['product_id', '=', product_id], ['location_id', '=', vlante_scraping_location_id]]],
                 {'fields': ['id', 'quantity']}
             )
 
@@ -341,7 +290,7 @@ class OdooConnector:
                     'stock.quant', 'write',
                     [[quant_id], {'quantity': stock_quantity}]
                 )
-                logger.info(f"📦 Stock actualizado en almacén Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
+                logger.info(f"📦 Stock actualizado en VLANTE/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
             else:
                 # Crear nuevo registro de inventario
                 self.models.execute_kw(
@@ -349,12 +298,12 @@ class OdooConnector:
                     'stock.quant', 'create',
                     [{
                         'product_id': product_id,
-                        'location_id': scraping_location_id,
+                        'location_id': vlante_scraping_location_id,
                         'quantity': stock_quantity,
                         'available_quantity': stock_quantity
                     }]
                 )
-                logger.info(f"📦 Stock creado en almacén Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
+                logger.info(f"📦 Stock creado en VLANTE/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
 
             return {"success": True, "quantity": stock_quantity}
 
@@ -364,7 +313,7 @@ class OdooConnector:
                 logger.warning(f"⚠️ Producto {product_data.get('codigo')} es un kit - no se puede actualizar stock directamente")
                 return {"success": False, "error": "Producto tipo kit - debe actualizar stock de componentes", "is_kit": True}
 
-            logger.error(f"Error al actualizar stock en Scraping: {e}")
+            logger.error(f"Error al actualizar stock en VLANTE/Scraping: {e}")
             return {"success": False, "error": str(e)}
 
     def _update_replenishment_rule(self, product_id: int) -> Dict:
@@ -449,34 +398,22 @@ class OdooConnector:
                 # Crear nueva regla de reposición
                 logger.info(f"➕ No se encontraron reglas existentes, creando nueva regla...")
 
-                # Buscar almacén Scraping para asociarlo a la regla
-                scraping_location_id = self._get_scraping_location()
-                if not scraping_location_id:
-                    logger.error(f"❌ No se encontró almacén 'Scraping'")
-                    # Intentar con un almacén por defecto
-                    logger.info(f"🔄 Intentando con almacén por defecto...")
-                    default_locations = self.models.execute_kw(
-                        self.db, self.uid, self.password,
-                        'stock.location', 'search_read',
-                        [[['usage', '=', 'internal'], ['scrap_location', '=', False]]],
-                        {'fields': ['id', 'name'], 'limit': 1}
-                    )
-                    if default_locations:
-                        scraping_location_id = default_locations[0]['id']
-                        logger.info(f"✅ Usando almacén por defecto: {default_locations[0]['name']} (ID: {scraping_location_id})")
-                    else:
-                        return {"success": False, "error": "No se pudo encontrar ningún almacén interno"}
+                # Buscar ubicación VLANT/Scraping para asociarla a la regla
+                vlante_scraping_location_id = self._get_scraping_location()
+                if not vlante_scraping_location_id:
+                    logger.error(f"❌ No se puede crear regla de reposición sin ubicación VLANT/Scraping")
+                    return {"success": False, "error": "Ubicación VLANT/Scraping no encontrada - no se puede crear regla de reposición"}
 
-                logger.info(f"🏭 Usando almacén ID: {scraping_location_id}")
+                logger.info(f"🏭 Usando ubicación ID: {vlante_scraping_location_id}")
 
                 new_rule_data = {
                     'product_tmpl_id': template_id,
                     'product_id': product_id,
-                    'location_id': scraping_location_id,
+                    'location_id': vlante_scraping_location_id,
                     'product_min_qty': -35,
                     'product_max_qty': -34,
                     'qty_multiple': 1,
-                    'name': f"Rule {product_code} - Scraping"
+                    'name': f"Rule {product_code} - VLANTE"
                 }
 
                 logger.info(f"📝 Datos de nueva regla: {new_rule_data}")
@@ -517,6 +454,17 @@ class OdooConnector:
                 logger.warning(f"⚠️ Precio de costo inválido para producto {product_data.get('codigo')}: {product_data.get('precioCosto')}")
                 precio_costo = 0.0
 
+            # Validar y procesar cantidad de disponibilidad (stock)
+            try:
+                disponibilidad = int(product_data.get('disponibilidad', 0))
+                # Asegurar que la cantidad mínima no sea negativa y tenga un valor razonable
+                min_qty = max(1, disponibilidad) if disponibilidad > 0 else 1
+                logger.info(f"📊 Stock disponible para {product_data.get('codigo')}: {disponibilidad} unidades")
+            except (ValueError, TypeError):
+                logger.warning(f"⚠️ Disponibilidad inválida para producto {product_data.get('codigo')}: {product_data.get('disponibilidad')}")
+                disponibilidad = 0
+                min_qty = 1
+
             # Actualizar precio de costo del producto solo si es válido
             if precio_costo > 0:
                 try:
@@ -554,7 +502,7 @@ class OdooConnector:
                 'partner_id': supplier_id,  # Corregido: 'name' -> 'partner_id'
                 'product_tmpl_id': template_id,  # Usar template_id en lugar de product_id
                 'price': precio_costo,
-                'min_qty': 1,
+                'min_qty': min_qty,  # Usar la cantidad real de stock disponible
                 'delay': 1,  # 1 día de entrega
                 'product_code': product_code,
                 'product_name': product_name[:100] if product_name else '',  # Limitar longitud
@@ -576,7 +524,7 @@ class OdooConnector:
                     'product.supplierinfo', 'write',
                     [[seller_id], seller_info]
                 )
-                logger.info(f"🛒 Info de compra actualizada: {product_code} - Precio: ${precio_costo}")
+                logger.info(f"🛒 Info de compra actualizada: {product_code} - Precio: ${precio_costo} - Cantidad mínima: {min_qty} (Stock: {disponibilidad})")
             else:
                 # Crear nuevo seller
                 seller_id = self.models.execute_kw(
@@ -584,7 +532,7 @@ class OdooConnector:
                     'product.supplierinfo', 'create',
                     [seller_info]
                 )
-                logger.info(f"🛒 Info de compra creada: {product_code} - Precio: ${precio_costo}")
+                logger.info(f"🛒 Info de compra creada: {product_code} - Precio: ${precio_costo} - Cantidad mínima: {min_qty} (Stock: {disponibilidad})")
 
             return {"success": True, "supplier_id": supplier_id, "price": precio_costo, "template_id": template_id}
 
@@ -593,80 +541,51 @@ class OdooConnector:
             return {"success": False, "error": str(e)}
 
     def _get_scraping_location(self) -> Optional[int]:
-        """Obtener ID del almacén 'Scraping'"""
+        """Obtener ID de la ubicación 'Scraping' dentro del almacén VLANTE 2 - FALLA si no encuentra la ubicación exacta"""
         try:
-            # Buscar ubicación 'Scraping'
-            locations = self.models.execute_kw(
+            # Primero buscar el almacén VLANTE 2 por su nombre corto VLANT
+            vlante_warehouses = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.warehouse', 'search_read',
+                [[['code', '=', 'VLANT']]],
+                {'fields': ['id', 'name', 'code']}
+            )
+
+            if not vlante_warehouses:
+                logger.error("❌ Almacén VLANTE 2 (código VLANT) no encontrado")
+                return None
+
+            vlante_warehouse = vlante_warehouses[0]
+            logger.info(f"✅ Almacén VLANTE 2 encontrado: {vlante_warehouse['name']} (ID: {vlante_warehouse['id']})")
+
+            # Buscar la ubicación VLANT/Scraping (location_id del almacén)
+            # En Odoo, las ubicaciones internas del almacén usualmente siguen el patrón: Warehouse Name/Location Name
+            scraping_locations = self.models.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.location', 'search_read',
-                [[['name', '=', 'Scraping'], ['usage', '=', 'internal']]],
-                {'fields': ['id', 'name']}
+                [[['name', '=', 'Scraping'], ['usage', '=', 'internal'],
+                  ['warehouse_id', '=', vlante_warehouse['id']]]],
+                {'fields': ['id', 'name', 'complete_name', 'warehouse_id']}
             )
 
-            if locations:
-                logger.info(f"✅ Almacén 'Scraping' encontrado con ID: {locations[0]['id']}")
-                return locations[0]['id']
+            if scraping_locations:
+                location = scraping_locations[0]
+                logger.info(f"✅ Ubicación VLANT/Scraping encontrada: {location['complete_name']} (ID: {location['id']})")
+                return location['id']
 
-            # Si no existe, crearla
-            logger.info("Creando almacén 'Scraping'...")
-
-            # Buscar la ubicación padre (Stock General o similar)
-            parent_locations = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                'stock.location', 'search_read',
-                [[['name', 'in', ['WH', 'Stock', 'Stock General', 'Internal Usage']], ['usage', '=', 'internal']]],
-                {'fields': ['id', 'name'], 'limit': 1}
-            )
-
-            parent_id = parent_locations[0]['id'] if parent_locations else 8  # Default WH/Stock
-
-            # Verificar que no exista conflicto de unicidad antes de crear
-            duplicate_check = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                'stock.location', 'search',
-                [[['name', '=', 'Scraping'], ['location_id', '=', parent_id]]]
-            )
-
-            if duplicate_check:
-                logger.warning("⚠️ Ya existe un almacén 'Scraping' en esta ubicación")
-                return duplicate_check[0]
-
-            # Crear nueva ubicación
-            location_id = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                'stock.location', 'create',
-                [{
-                    'name': 'Scraping',
-                    'location_id': parent_id,
-                    'usage': 'internal',
-                    'scrap_location': False,
-                    'comment': 'Almacén para productos obtenidos por scraping de PR Autopartes'
-                }]
-            )
-            logger.info(f"✅ Almacén 'Scraping' creado con ID: {location_id}")
-            return location_id
-
-        except Exception as e:
-            # Si hay error al crear, intentar buscar de nuevo por si lo creó otro proceso
-            try:
-                logger.warning(f"Error al crear almacén, intentando buscar existente: {e}")
-                locations = self.models.execute_kw(
-                    self.db, self.uid, self.password,
-                    'stock.location', 'search_read',
-                    [[['name', '=', 'Scraping'], ['usage', '=', 'internal']]],
-                    {'fields': ['id', 'name']}
-                )
-                if locations:
-                    logger.info(f"✅ Almacén 'Scraping' encontrado en búsqueda fallback: {locations[0]['id']}")
-                    return locations[0]['id']
-            except Exception as fallback_e:
-                logger.error(f"Error en búsqueda fallback: {fallback_e}")
-
-            logger.error(f"Error al obtener/crear almacén Scraping: {e}")
+            # Si no encuentra la ubicación Scraping específica, FALLAR con error claro
+            logger.error("❌ UBICACIÓN OBLIGATORIA 'Scraping' NO ENCONTRADA en el almacén VLANTE 2")
+            logger.error("❌ Debe crear la ubicación 'Scraping' dentro del almacén VLANTE 2 manualmente en Odoo")
+            logger.error(f"❌ Almacén VLANTE 2 encontrado: {vlante_warehouse['name']} (ID: {vlante_warehouse['id']})")
+            logger.error("❌ La ubicación debe ser: VLANT/Scraping con uso 'Internal'")
             return None
 
+        except Exception as e:
+            logger.error(f"❌ Error al buscar ubicación VLANT/Scraping: {e}")
+            return None
+  
     def _get_or_create_supplier(self) -> Optional[int]:
-        """Obener o crear proveedor 'PR Autopartes (Scraping)'"""
+        """Obtener o crear proveedor 'PR Autopartes (Scraping)'"""
         try:
             # Buscar proveedor existente
             suppliers = self.models.execute_kw(
@@ -705,35 +624,7 @@ class OdooConnector:
             logger.error(f"Error al crear/obtener proveedor: {e}")
             return None
 
-    def _get_or_create_category(self, marca: str) -> Optional[int]:
-        """Obtener o crear categoría de producto por marca"""
-        try:
-            # Buscar categoría existente
-            category_ids = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                'product.category', 'search',
-                [[['name', '=', marca]]]
-            )
-
-            if category_ids:
-                return category_ids[0]
-
-            # Crear nueva categoría
-            logger.info(f"Creando nueva categoría: {marca}")
-            category_id = self.models.execute_kw(
-                self.db, self.uid, self.password,
-                'product.category', 'create',
-                [{
-                    'name': marca,
-                    'parent_id': 1,  # Categoría raíz
-                }]
-            )
-            return category_id
-
-        except Exception as e:
-            logger.error(f"Error al crear categoría {marca}: {e}")
-            return None
-
+    
 class PrAutoParteScraper:
     """Scraper profesional para PrAutoParte"""
     
@@ -789,38 +680,21 @@ class PrAutoParteScraper:
         logger.info(f"🔧 Logging configurado - Nivel: {log_level} - Directorio: {log_dir}")
         logger.info(f"📄 Log file: {self.config.get_log_path()}")
 
-    def _normalize_code(self, code: str) -> str:
-        """Normalizar código de producto para matching robusto"""
-        if not code or pd.isna(code):
-            return ""
-
-        # Convertir a string y limpiar
-        code_str = str(code).strip()
-
-        # Eliminar espacios extras y normalizar
-        code_str = ' '.join(code_str.split())  # Eliminar espacios dobles
-        code_str = code_str.upper()  # Convertir a mayúsculas para matching insensible a mayúsculas
-
-        # Eliminar caracteres problemáticos comunes en códigos
-        chars_to_remove = ['.', '-', '_', '/', '(', ')', '[', ']', ' ']
-        for char in chars_to_remove:
-            code_str = code_str.replace(char, '')
-
-        return code_str.strip()
-
+  
     def _load_matched_codes(self) -> set:
-        """Generar datasets automáticamente y cargar códigos coincidentes con matching mejorado"""
+        """Cargar datasets existentes y calcular códigos coincidentes SIN descargar"""
         try:
-            logger.info("🔍 Generando datasets automáticamente para análisis de coincidencias...")
+            logger.info("🔍 Analizando coincidencias desde datasets existentes...")
 
-            # 1. Generar dataset de productos desde Odoo
-            df_productos = self._generate_odoo_products_dataset()
+            # 1. Cargar dataset de productos Odoo desde CSV/Excel existente
+            df_productos = self._load_odoo_products_from_backup()
 
-            # 2. Obtener dataset de artículos desde scraping más reciente
+            # 2. Cargar dataset de artículos desde CSV más reciente
             df_articulos = self._get_latest_scraping_results()
 
             if df_productos is None or df_articulos is None:
-                logger.error("❌ No se pudieron generar los datasets necesarios")
+                logger.error("❌ No se pudieron cargar los datasets necesarios")
+                logger.info("💡 Ejecuta el scraper completo primero para generar los datasets")
                 return set()
 
             logger.info(f"📊 Dataset Productos (Odoo): {len(df_productos)} registros")
@@ -833,14 +707,14 @@ class PrAutoParteScraper:
             if 'default_code' in df_productos.columns:
                 df_productos_clean = df_productos.dropna(subset=['default_code'])
                 for code in df_productos_clean['default_code']:
-                    normalized_code = self._normalize_code(code)
+                    normalized_code = CodeNormalizer.normalize_code(code)
                     if normalized_code:  # Solo agregar si no está vacío después de normalizar
                         codigos_productos.add(str(code).strip())
                         codigos_productos_norm.add(normalized_code)
             elif 'Referencia interna' in df_productos.columns:
                 df_productos_clean = df_productos.dropna(subset=['Referencia interna'])
                 for code in df_productos_clean['Referencia interna']:
-                    normalized_code = self._normalize_code(code)
+                    normalized_code = CodeNormalizer.normalize_code(code)
                     if normalized_code:
                         codigos_productos.add(str(code).strip())
                         codigos_productos_norm.add(normalized_code)
@@ -853,7 +727,7 @@ class PrAutoParteScraper:
                 df_articulos_clean = df_articulos.dropna(subset=['codigo'])
                 for code in df_articulos_clean['codigo']:
                     original_code = str(code).strip()
-                    normalized_code = self._normalize_code(code)
+                    normalized_code = CodeNormalizer.normalize_code(code)
                     if normalized_code and original_code:
                         codigos_articulos.add(original_code)
                         codigos_articulos_norm[normalized_code] = original_code
@@ -877,16 +751,31 @@ class PrAutoParteScraper:
             if len(codigos_articulos) > 0:
                 logger.info(f"📈 Porcentaje de coincidencia: {len(matched_codes)/len(codigos_articulos)*100:.1f}%")
 
-            # Mostrar algunos ejemplos de códigos coincidentes
-            if matched_codes:
-                sample_codes = list(matched_codes)[:5]
-                logger.info(f"📝 Ejemplos de códigos coincidentes: {sample_codes}")
-
             return matched_codes
 
         except Exception as e:
-            logger.error(f"❌ Error al generar/cargar códigos coincidentes: {e}")
+            logger.error(f"❌ Error al cargar códigos coincidentes: {e}")
             return set()
+
+    def _load_odoo_products_from_backup(self) -> Optional[pd.DataFrame]:
+        """Cargar productos Odoo desde backup existente SIN descargar"""
+        try:
+            # Buscar archivo Excel de productos
+            productos_path = Path(self.config.output_dir) / "Producto (product.template).xlsx"
+
+            if productos_path.exists():
+                logger.info(f"📁 Cargando productos Odoo desde backup: {productos_path.name}")
+                df = pd.read_excel(productos_path)
+                logger.info(f"✅ Productos Odoo cargados: {len(df)} registros")
+                return df
+            else:
+                logger.warning(f"⚠️ No se encuentra backup de productos Odoo: {productos_path.name}")
+                logger.info("💡 Se generará nuevo dataset al ejecutar el scraper completo")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Error al cargar backup de productos Odoo: {e}")
+            return None
 
     def _generate_odoo_products_dataset(self) -> Optional[pd.DataFrame]:
         """Extraer productos desde Odoo y guardar como Excel"""
@@ -984,6 +873,26 @@ class PrAutoParteScraper:
         except Exception as e:
             logger.error(f"❌ Error al cargar resultados del scraping: {e}")
             return None
+
+    def _get_latest_scraping_results_as_dict(self) -> Dict:
+        """Convertir CSV más reciente a formato dict para process_matched_products_optimized"""
+        try:
+            df = self._get_latest_scraping_results()
+            if df is None:
+                return {"success": False, "error": "No se encontraron datos de scraping"}
+
+            # Convertir DataFrame a lista de diccionarios como items
+            items = df.to_dict('records')
+
+            return {
+                "success": True,
+                "items": items,
+                "total_items": len(items)
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error al convertir scraping results a dict: {e}")
+            return {"success": False, "error": str(e)}
 
     def _is_matched_product(self, product_code: str) -> bool:
         """Verificar si un producto tiene coincidencia exacta"""
@@ -1277,95 +1186,24 @@ class PrAutoParteScraper:
         }
 
     def _send_to_odoo(self, product_data: Dict) -> bool:
-        """Enviar datos de producto directamente a Odoo"""
+        """Enviar datos de producto coincidente a Odoo"""
         try:
             product_code = product_data.get('codigo', '')
+            logger.info(f"🔄 Actualizando producto coincidente: {product_code}")
 
-            # Verificar si es un producto coincidente
-            if self._is_matched_product(product_code):
-                logger.info(f"🔄 Producto coincidente detectado: {product_code}")
-                result = self.odoo_connector.update_matched_product(product_data)
-            else:
-                # Producto normal, crear o actualizar normalmente
-                result = self.odoo_connector.create_or_update_product(product_data)
+            result = self.odoo_connector.update_matched_product(product_data)
 
             if result.get("success"):
-                action = result.get("action", "processed")
-                logger.info(f"✅ Producto {product_code} {action} en Odoo")
+                logger.info(f"✅ Producto {product_code} actualizado en Odoo")
                 return True
             else:
                 logger.error(f"❌ Error al enviar producto {product_code} a Odoo: {result.get('error')}")
                 return False
+
         except Exception as e:
             logger.error(f"❌ Error inesperado al enviar producto {product_data.get('codigo')} a Odoo: {e}")
             return False
 
-    def _send_batch_to_odoo(self, products: List[Dict]) -> Dict:
-        """Enviar lote de productos directamente a Odoo con manejo robusto de errores"""
-        if not products:
-            logger.warning("⚠️ Intentando enviar lote vacío a Odoo")
-            return {"success": False, "error": "Lote vacío", "processed": 0, "successful": 0, "failed": 0}
-
-        try:
-            results = []
-            successful_products = 0
-            failed_products = 0
-
-            logger.info(f"📦 Procesando lote de {len(products)} productos en Odoo")
-
-            for i, product in enumerate(products, 1):
-                try:
-                    # Validar producto antes de enviar
-                    if not product.get('codigo'):
-                        logger.warning(f"⚠️ Producto {i} sin código, omitiendo")
-                        failed_products += 1
-                        results.append({"success": False, "error": "Producto sin código", "product": product})
-                        continue
-
-                    result = self.odoo_connector.create_or_update_product(product)
-                    results.append(result)
-
-                    if result.get("success"):
-                        successful_products += 1
-                        action = result.get("action", "procesado")
-                        logger.debug(f"✅ Producto {i} {action}: {product.get('codigo')}")
-                    else:
-                        failed_products += 1
-                        logger.warning(f"❌ Producto {i} fallido: {product.get('codigo')} - {result.get('error')}")
-
-                    # Pequeña pausa para no sobrecargar Odoo
-                    time.sleep(0.1)
-
-                except Exception as e:
-                    failed_products += 1
-                    error_msg = f"Error procesando producto {i}: {str(e)}"
-                    logger.error(f"❌ {error_msg}")
-                    results.append({"success": False, "error": error_msg, "product": product})
-
-            # Resumen del procesamiento del lote
-            success_rate = (successful_products / len(products)) * 100 if products else 0
-            logger.info(f"📊 Lote procesado - Total: {len(products)} | ✅ Exitosos: {successful_products} | ❌ Fallidos: {failed_products} | 📈 Tasa éxito: {success_rate:.1f}%")
-
-            return {
-                "success": successful_products > 0,
-                "processed": len(products),
-                "successful": successful_products,
-                "failed": failed_products,
-                "success_rate": success_rate,
-                "details": results
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error crítico al enviar lote a Odoo: {e}")
-            return {"success": False, "error": str(e), "processed": len(products), "successful": 0, "failed": len(products)}
-
-    def _connect_to_odoo(self) -> bool:
-        """Conectar a Odoo si aún no está conectado"""
-        if not self.odoo_connector.models:
-            logger.info("Conectando a Odoo...")
-            return self.odoo_connector.connect()
-        return True
-    
     def _process_matched_product_from_data(self, product_code: str, scraped_data: Dict) -> Dict:
         """Procesar un producto coincidente usando datos ya scrapeados (sin nueva petición)"""
         try:
@@ -1393,7 +1231,7 @@ class PrAutoParteScraper:
             return {"success": False, "error": f"Error procesando producto {product_code}: {e}", "code": product_code}
 
     def process_matched_products_optimized(self, scraped_products_data: Dict) -> None:
-        """Procesar productos coincidentes usando datos ya scrapeados (SIN nuevo scraping)"""
+        """Procesar productos coincidentes usando datos ya scrapeados"""
         logger.info(f"🚀 Procesando {len(self.matched_codes)} productos coincidentes SIN nuevo scraping...")
 
         # Configuración inicial
@@ -1406,7 +1244,7 @@ class PrAutoParteScraper:
         odoo_connected = False
         if self.config.send_to_odoo:
             logger.info("🔌 Verificando conexión con Odoo...")
-            odoo_connected = self._connect_to_odoo()
+            odoo_connected = self.odoo_connector.connect()
             if not odoo_connected:
                 logger.warning("⚠️ No se pudo conectar a Odoo. Continuando solo con análisis.")
                 self.config.send_to_odoo = False
@@ -1626,16 +1464,23 @@ class PrAutoParteScraper:
             except:
                 logger.error("❌ Error al cerrar archivo CSV")
 
-    def run(self) -> None:
-        """Ejecutar el proceso completo de scraping optimizado (SIN doble scraping)"""
+    def run(self, create_merged_csv: bool = True) -> None:
+        """Ejecutar el proceso completo de scraping optimizado"""
         try:
-            logger.info("Iniciando PrAutoParte Scraper Optimizado...")
+            logger.info("🚀 Iniciando PrAutoParte Scraper Optimizado v2.0...")
 
-            # 1. Obtener token de sesión
+            # 1. Obtener token de sesión (siempre se necesita para scraping)
             logger.info("🔑 Obteniendo credenciales de sesión...")
             num_pages, bearer_token = self.login_and_get_session_data()
 
-            # 2. Ejecutar scraping completo Y recolectar datos para coincidencias
+            # 2. Generar dataset de productos Odoo (una sola vez)
+            logger.info("📊 Generando dataset de productos Odoo...")
+            df_productos = self._generate_odoo_products_dataset()
+            if df_productos is None:
+                logger.error("❌ No se pudo generar dataset de productos Odoo")
+                return
+
+            # 3. Ejecutar scraping completo Y recolectar datos para coincidencias
             logger.info("📡 Ejecutando scraping completo y recolectando datos...")
             scraping_result = self.scrape_products_and_collect_data(num_pages, bearer_token)
 
@@ -1644,26 +1489,114 @@ class PrAutoParteScraper:
                 logger.error(f"❌ El scraping falló: {scraping_result.get('error')}")
                 return
 
-            # 3. Ahora que tenemos el scraping actualizado, cargar coincidencias
-            logger.info("🔍 Analizando coincidencias con datos actualizados...")
+            # 4. Cargar coincidencias desde datasets generados (SIN descargas)
+            logger.info("🔍 Analizando coincidencias desde datasets existentes...")
             self.matched_codes = self._load_matched_codes()
 
-            # 4. Verificar que hay productos coincidentes
+            # 5. Verificar que hay productos coincidentes
             if not self.matched_codes:
                 logger.warning("⚠️ No se encontraron productos coincidentes. No hay nada que procesar.")
                 logger.info("💡 El scraping se completó y se guardó en CSV, pero no hubo coincidencias con Odoo")
                 return
 
-            logger.info(f"🎯 Modo optimizado: Se procesarán {len(self.matched_codes)} productos coincidentes")
+            logger.info(f"🎯 Se procesarán {len(self.matched_codes)} productos coincidentes")
 
-            # 5. Procesar coincidencias usando datos YA SCRAPEADOS (SIN nuevo scraping)
+            # 6. Opcional: Crear CSV merged para análisis
+            if create_merged_csv:
+                logger.info("📄 Creando CSV merged con datos combinados...")
+                self._create_merged_csv(df_productos, scraping_result)
+
+            # 7. Procesar coincidencias usando datos YA SCRAPEADOS (SIN nuevo scraping)
             self.process_matched_products_optimized(scraping_result)
 
-            logger.info("Proceso optimizado completado exitosamente")
+            logger.info("✅ Proceso optimizado completado exitosamente")
+            logger.info("📁 Archivos generados:")
+            logger.info(f"   📊 Productos Odoo: Producto (product.template).xlsx")
+            logger.info(f"   📄 Artículos scraping: {scraping_result.get('csv_path').name if scraping_result.get('csv_path') else 'N/A'}")
+            if create_merged_csv:
+                logger.info(f"   🔗 Dataset merged: productos_merged.csv")
 
         except Exception as e:
-            logger.error(f"Error en el proceso principal: {e}")
+            logger.error(f"❌ Error en el proceso principal: {e}")
             raise
+
+    def _create_merged_csv(self, df_productos: pd.DataFrame, scraping_result: Dict) -> None:
+        """Crear CSV merged combinando datos de Odoo y scraping"""
+        try:
+            logger.info("📄 Creando dataset merged para análisis...")
+
+            # Convertir scraped items a DataFrame
+            scraped_items = scraping_result.get("items", [])
+            if not scraped_items:
+                logger.warning("⚠️ No hay datos scraped para crear merged CSV")
+                return
+
+            # Extraer datos de scraped items
+            scraped_data = []
+            for item in scraped_items:
+                scraped_data.append(self._extract_item_data(item))
+
+            df_scraped = pd.DataFrame(scraped_data)
+
+            # Preparar DataFrames para merge
+            # Productos Odoo: usar 'default_code' o 'Referencia interna' como clave
+            odoo_key_col = 'default_code' if 'default_code' in df_productos.columns else 'Referencia interna'
+
+            # Scrapeados: usar 'codigo' como clave
+            scraped_key_col = 'codigo'
+
+            # Renombrar columnas clave para consistencia
+            df_productos_merge = df_productos.copy()
+            df_scraped_merge = df_scraped.copy()
+
+            df_productos_merge = df_productos_merge.rename(columns={odoo_key_col: 'codigo_merged'})
+            df_scraped_merge = df_scraped_merge.rename(columns={scraped_key_col: 'codigo_merged'})
+
+            # Merge por código normalizado
+            merged_df = pd.merge(
+                df_productos_merge,
+                df_scraped_merge,
+                on='codigo_merged',
+                how='inner',
+                suffixes=('_odoo', '_scraped')
+            )
+
+            # Reorganizar columnas para mejor visualización
+            column_order = [
+                'codigo_merged', 'name_odoo', 'marca_scraped', 'descripcion_scraped',
+                'list_price_odoo', 'precioLista_scraped', 'precioCosto_scraped',
+                'Cantidad a la mano_odoo', 'disponibilidad_scraped',
+                'id_scraped', 'id_odoo'
+            ]
+
+            # Agregar columnas que existan en el orden deseado
+            final_columns = []
+            for col in column_order:
+                if col in merged_df.columns:
+                    final_columns.append(col)
+
+            # Agregar resto de columnas
+            for col in merged_df.columns:
+                if col not in final_columns:
+                    final_columns.append(col)
+
+            merged_df = merged_df[final_columns]
+
+            # Guardar merged CSV
+            merged_path = Path(self.config.output_dir) / "productos_merged.csv"
+            merged_df.to_csv(merged_path, index=False, encoding='utf-8')
+
+            logger.info(f"✅ Dataset merged creado: {merged_path.name}")
+            logger.info(f"📊 Registros combinados: {len(merged_df)} productos coincidentes")
+            logger.info(f"📁 Guardado en: {merged_path.absolute()}")
+
+            # Estadísticas del merge
+            if len(df_productos) > 0 and len(df_scraped) > 0:
+                match_rate = len(merged_df) / min(len(df_productos), len(df_scraped)) * 100
+                logger.info(f"📈 Tasa de coincidencia real: {match_rate:.1f}%")
+
+        except Exception as e:
+            logger.error(f"❌ Error al crear CSV merged: {e}")
 
 def main():
     """Función principal"""
@@ -1689,6 +1622,47 @@ def run_scheduler():
         schedule.run_pending()
         time.sleep(600)  # Verificar cada 10 minutos
 
+def run_matched_only():
+    """Ejecutar solo procesamiento de coincidencias desde datasets existentes"""
+    try:
+        logger.info("🔍 Modo solo coincidencias - SIN scraping nuevo")
+        config = ScrapingConfig()
+        scraper = PrAutoParteScraper(config)
+
+        # Cargar coincidencias desde datasets existentes
+        logger.info("🔍 Cargando coincidencias desde datasets existentes...")
+        scraper.matched_codes = scraper._load_matched_codes()
+
+        # Cargar dataset de productos para merged CSV
+        df_productos = scraper._load_odoo_products_from_backup()
+
+        # Cargar scraped data más reciente
+        df_articulos = scraper._get_latest_scraping_results()
+        if df_articulos is None:
+            logger.error("❌ No se encuentran datos de scraping. Ejecuta scraping completo primero.")
+            return
+
+        # Convertir a formato esperado por process_matched_products_optimized
+        scraped_data = scraper._get_latest_scraping_results_as_dict()
+
+        if not scraper.matched_codes:
+            logger.warning("⚠️ No se encontraron productos coincidentes")
+            return
+
+        logger.info(f"🎯 Procesando {len(scraper.matched_codes)} coincidencias SIN nuevas descargas...")
+
+        # Opcional: Crear merged CSV
+        if df_productos is not None and scraped_data.get("success"):
+            scraper._create_merged_csv(df_productos, scraped_data)
+
+        # Procesar coincidencias
+        scraper.process_matched_products_optimized(scraped_data)
+
+        logger.info("✅ Procesamiento de coincidencias completado")
+
+    except Exception as e:
+        logger.error(f"❌ Error en modo solo coincidencias: {e}")
+
 def main_cli():
     """Función para manejar argumentos de línea de comandos"""
 
@@ -1697,10 +1671,15 @@ def main_cli():
                        help='Ejecutar una sola vez en lugar del scheduler')
     parser.add_argument('--schedule', action='store_true',
                        help='Ejecutar con scheduler diario a las 9 AM (por defecto)')
+    parser.add_argument('--matched-only', action='store_true',
+                       help='Procesar solo coincidencias desde datasets existentes (sin scraping nuevo)')
 
     args = parser.parse_args()
 
-    if args.once:
+    if args.matched_only:
+        logger.info("Modo solo coincidencias")
+        run_matched_only()
+    elif args.once:
         logger.info("Modo ejecución única")
         main()
     else:
