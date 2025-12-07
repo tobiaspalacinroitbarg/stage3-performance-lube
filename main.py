@@ -65,6 +65,10 @@ class ScrapingConfig:
     output_dir: str = os.getenv("OUTPUT_DIR", "./output")
     logs_dir: str = os.getenv("PM2_LOG_DIR", "./logs")
 
+    # Archivos de entrada (desde variables de entorno)
+    odoo_products_file: str = os.getenv("ODOO_PRODUCTS_FILE", "Producto (product.template).xlsx")
+    merged_output_file: str = os.getenv("MERGED_OUTPUT_FILE", "productos_merged.csv")
+
     # Configuración Odoo (desde variables de entorno)
     odoo_url: str = os.getenv("ODOO_URL", "http://localhost:8069")
     odoo_db: str = os.getenv("ODOO_DB", "odoo")
@@ -109,6 +113,14 @@ class ScrapingConfig:
         """Obtener ruta del archivo de log diario"""
         today = datetime.now().strftime("%Y-%m-%d")
         return Path(self.logs_dir) / f"scraper_{today}.log"
+
+    def get_odoo_products_path(self) -> Path:
+        """Obtener ruta completa del archivo de productos Odoo"""
+        return Path(self.output_dir) / self.odoo_products_file
+
+    def get_merged_output_path(self) -> Path:
+        """Obtener ruta completa del archivo merged de salida"""
+        return Path(self.output_dir) / self.merged_output_file
 
 class OdooConnector:
     """Clase para manejar la conexión con Odoo"""
@@ -228,6 +240,67 @@ class OdooConnector:
 
         except Exception as e:
             logger.error(f"Error al actualizar producto coincidente: {e}")
+            return {"success": False, "error": str(e)}
+
+    def update_matched_product_optimized(self, product_data: Dict, cached_data: Dict) -> Dict:
+        """🚀 ACTUALIZAR PRODUCTO USANDO DATOS CACHEADOS - MUCHO MÁS RÁPIDO
+        1. Cargar stock en ubicación VLANTE/Scraping (usando location_id cacheado)
+        2. Actualizar info de compra con proveedor cacheado
+        3. Establecer regla de reposición (usando reglas cacheadas)
+        """
+        if not self.models:
+            return {"success": False, "error": "No conectado a Odoo"}
+
+        try:
+            product_code = product_data.get('codigo', '')
+
+            # 🔥 Usar información cacheada del producto
+            product_info = cached_data.get('product_info', {}).get(product_code)
+            if not product_info:
+                return {"success": False, "error": f"Producto {product_code} no encontrado en datos cacheados"}
+
+            existing_product_id = product_info['product_id']
+            template_id = product_info['template_id']
+
+            logger.info(f"🚀 Actualizando producto {product_code} con datos cacheados (ID: {existing_product_id})")
+
+            # 1. Cargar stock usando location_id cacheado
+            scraping_stock_result = self._update_scraping_stock_optimized(
+                existing_product_id,
+                product_data,
+                cached_data['scraping_location_id'],
+                cached_data['kits_info']
+            )
+
+            # 2. Actualizar información de compra usando supplier_id cacheado
+            purchase_info_result = self._update_purchase_info_optimized(
+                existing_product_id,
+                product_data,
+                cached_data['supplier_id']
+            )
+
+            # 3. Establecer regla de reposición usando reglas cacheadas
+            replenishment_result = self._update_replenishment_rule_optimized(
+                existing_product_id,
+                template_id,
+                product_code,
+                cached_data['scraping_location_id'],
+                cached_data['existing_rules']
+            )
+
+            return {
+                "success": True,
+                "action": "matched_updated_optimized",
+                "product_id": existing_product_id,
+                "product_code": product_code,
+                "stock_updated": scraping_stock_result,
+                "purchase_updated": purchase_info_result,
+                "replenishment_updated": replenishment_result,
+                "optimization_used": True
+            }
+
+        except Exception as e:
+            logger.error(f"Error al actualizar producto coincidente optimizado: {e}")
             return {"success": False, "error": str(e)}
 
     def _update_scraping_stock(self, product_id: int, product_data: Dict) -> Dict:
@@ -624,7 +697,194 @@ class OdooConnector:
             logger.error(f"Error al crear/obtener proveedor: {e}")
             return None
 
-    
+    # 🔥 MÉTODOS OPTIMIZADOS CACHEADOS
+    def _update_scraping_stock_optimized(self, product_id: int, product_data: Dict, location_id: int, kits_info: set) -> Dict:
+        """Actualizar stock usando location_id cacheado y verificación KIT cacheada"""
+        try:
+            product_code = product_data.get('codigo', '')
+
+            # 🔥 Usar información cacheada de KITs
+            product_info = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'product.product', 'read',
+                [[product_id]],
+                {'fields': ['product_tmpl_id']}
+            )
+
+            if product_info:
+                template_id = product_info[0]['product_tmpl_id'][0]
+                if template_id in kits_info:
+                    logger.warning(f"⚠️ Producto {product_code} es un kit (cacheado). No se puede actualizar stock directamente.")
+                    return {"success": False, "error": "Producto tipo kit - no se puede actualizar stock directamente", "is_kit": True}
+
+            # Obtener disponibilidad
+            disponibilidad = product_data.get('disponibilidad', 0)
+            stock_quantity = int(disponibilidad) if disponibilidad else 0
+
+            logger.info(f"📦 Actualizando stock cacheado: {product_code} - {stock_quantity} unidades")
+
+            # Buscar si ya existe registro de inventario (sin buscar location)
+            existing_quants = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.quant', 'search_read',
+                [[['product_id', '=', product_id], ['location_id', '=', location_id]]],
+                {'fields': ['id', 'quantity']}
+            )
+
+            if existing_quants:
+                # Actualizar cantidad existente
+                quant_id = existing_quants[0]['id']
+                self.models.execute_kw(
+                    self.db, self.uid, self.password,
+                    'stock.quant', 'write',
+                    [[quant_id], {'quantity': stock_quantity}]
+                )
+                logger.info(f"📦 Stock cacheado actualizado: {product_code} - {stock_quantity} unidades")
+            else:
+                # Crear nuevo registro de inventario
+                self.models.execute_kw(
+                    self.db, self.uid, self.password,
+                    'stock.quant', 'create',
+                    [{
+                        'product_id': product_id,
+                        'location_id': location_id,
+                        'quantity': stock_quantity,
+                        'available_quantity': stock_quantity
+                    }]
+                )
+                logger.info(f"📦 Stock cacheado creado: {product_code} - {stock_quantity} unidades")
+
+            return {"success": True, "quantity": stock_quantity}
+
+        except Exception as e:
+            logger.error(f"Error al actualizar stock cacheado: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _update_purchase_info_optimized(self, product_id: int, product_data: Dict, supplier_id: int) -> Dict:
+        """Actualizar información de compra usando supplier_id cacheado"""
+        try:
+            product_code = product_data.get('codigo', '')
+            precio_costo = product_data.get('precioCosto', 0)
+
+            # Obtener template_id
+            product_info = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'product.product', 'read',
+                [[product_id]],
+                {'fields': ['product_tmpl_id']}
+            )
+
+            if not product_info:
+                return {"success": False, "error": "No se pudo obtener información del producto"}
+
+            template_id = product_info[0]['product_tmpl_id'][0]
+
+            # Buscar info de proveedor existente para este producto
+            existing_seller = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'product.supplierinfo', 'search_read',
+                [[['product_tmpl_id', '=', template_id], ['partner_id', '=', supplier_id]]],
+                {'fields': ['id', 'price']}
+            )
+
+            if existing_seller:
+                # Actualizar precio si es diferente
+                seller_id = existing_seller[0]['id']
+                if float(existing_seller[0]['price']) != float(precio_costo):
+                    self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'product.supplierinfo', 'write',
+                        [[seller_id], {'price': float(precio_costo)}]
+                    )
+                    logger.info(f"💰 Precio de compra actualizado cacheado: {product_code} - ${precio_costo}")
+                else:
+                    logger.info(f"💰 Precio de compra sin cambios: {product_code} - ${precio_costo}")
+            else:
+                # Crear nueva información de proveedor
+                self.models.execute_kw(
+                    self.db, self.uid, self.password,
+                    'product.supplierinfo', 'create',
+                    [{
+                        'product_tmpl_id': template_id,
+                        'partner_id': supplier_id,
+                        'price': float(precio_costo),
+                        'min_qty': 1,
+                        'delay': 7
+                    }]
+                )
+                logger.info(f"💰 Info de compra creada cacheado: {product_code} - ${precio_costo}")
+
+            return {"success": True, "price": precio_costo}
+
+        except Exception as e:
+            logger.error(f"Error al actualizar info de compra cacheada: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _update_replenishment_rule_optimized(self, product_id: int, template_id: int, product_code: str, location_id: int, existing_rules: Dict) -> Dict:
+        """Actualizar regla de reposición usando datos cacheados"""
+        try:
+            logger.info(f"🔍 Actualizando regla de reposición cacheada: {product_code}")
+
+            # 🔥 Usar reglas cacheadas
+            template_rules = existing_rules.get(template_id, [])
+
+            if template_rules:
+                # Actualizar la primera regla existente
+                rule_id = template_rules[0]['id']
+                old_min = template_rules[0].get('product_min_qty', 'N/A')
+                old_max = template_rules[0].get('product_max_qty', 'N/A')
+
+                logger.info(f"🔄 Actualizando regla cacheada ID:{rule_id}")
+                logger.info(f"📈 Valores anteriores: Min={old_min}, Max={old_max}")
+                logger.info(f"📈 Nuevos valores: Min=-35, Max=-34")
+
+                update_result = self.models.execute_kw(
+                    self.db, self.uid, self.password,
+                    'stock.warehouse.orderpoint', 'write',
+                    [[rule_id], {
+                        'product_min_qty': -35,
+                        'product_max_qty': -34
+                    }]
+                )
+
+                if update_result:
+                    logger.info(f"✅ Regla cacheada actualizada exitosamente: {rule_id}")
+                    return {"success": True, "action": "updated", "rule_id": rule_id, "min_qty": -35}
+                else:
+                    logger.error(f"❌ Error al actualizar regla cacheada: {rule_id}")
+                    return {"success": False, "error": "Error al actualizar regla existente"}
+            else:
+                # Crear nueva regla usando location_id cacheado
+                logger.info(f"➕ Creando nueva regla cacheada para: {product_code}")
+
+                new_rule_data = {
+                    'product_tmpl_id': template_id,
+                    'product_id': product_id,
+                    'location_id': location_id,
+                    'product_min_qty': -35,
+                    'product_max_qty': -34,
+                    'qty_multiple': 1,
+                    'name': f"Rule {product_code} - VLANTE"
+                }
+
+                rule_id = self.models.execute_kw(
+                    self.db, self.uid, self.password,
+                    'stock.warehouse.orderpoint', 'create',
+                    [new_rule_data]
+                )
+
+                if rule_id:
+                    logger.info(f"✅ Regla cacheada creada exitosamente: {rule_id} - Mínimo: -35")
+                    return {"success": True, "action": "created", "rule_id": rule_id, "min_qty": -35}
+                else:
+                    logger.error(f"❌ Error al crear regla cacheada")
+                    return {"success": False, "error": "Error al crear nueva regla"}
+
+        except Exception as e:
+            logger.error(f"❌ Error al actualizar regla cacheada: {e}")
+            return {"success": False, "error": str(e)}
+
+
 class PrAutoParteScraper:
     """Scraper profesional para PrAutoParte"""
     
@@ -760,8 +1020,8 @@ class PrAutoParteScraper:
     def _load_odoo_products_from_backup(self) -> Optional[pd.DataFrame]:
         """Cargar productos Odoo desde backup existente SIN descargar"""
         try:
-            # Buscar archivo Excel de productos
-            productos_path = Path(self.config.output_dir) / "Producto (product.template).xlsx"
+            # Buscar archivo Excel de productos usando variable de entorno
+            productos_path = self.config.get_odoo_products_path()
 
             if productos_path.exists():
                 logger.info(f"📁 Cargando productos Odoo desde backup: {productos_path.name}")
@@ -830,8 +1090,8 @@ class PrAutoParteScraper:
                 if campo not in df.columns:
                     df[campo] = None
 
-            # Guardar como Excel
-            productos_path = Path(self.config.output_dir) / "Producto (product.template).xlsx"
+            # Guardar como Excel usando variable de entorno
+            productos_path = self.config.get_odoo_products_path()
 
             # Hacer backup si existe
             if productos_path.exists():
@@ -1204,6 +1464,25 @@ class PrAutoParteScraper:
             logger.error(f"❌ Error inesperado al enviar producto {product_data.get('codigo')} a Odoo: {e}")
             return False
 
+    def _send_to_odoo_optimized(self, product_data: Dict, cached_data: Dict) -> bool:
+        """🔥 ENVIAR A ODOO USANDO DATOS CACHEADOS - MÁS RÁPIDO"""
+        try:
+            product_code = product_data.get('codigo', '')
+            logger.info(f"🚀 Actualizando producto {product_code} con datos cacheados...")
+
+            result = self.odoo_connector.update_matched_product_optimized(product_data, cached_data)
+
+            if result.get("success"):
+                logger.info(f"✅ Producto {product_code} actualizado en Odoo")
+                return True
+            else:
+                logger.error(f"❌ Error al enviar producto {product_code} a Odoo: {result.get('error')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Error inesperado al enviar producto {product_data.get('codigo')} a Odoo: {e}")
+            return False
+
     def _process_matched_product_from_data(self, product_code: str, scraped_data: Dict) -> Dict:
         """Procesar un producto coincidente usando datos ya scrapeados (sin nueva petición)"""
         try:
@@ -1230,8 +1509,125 @@ class PrAutoParteScraper:
         except Exception as e:
             return {"success": False, "error": f"Error procesando producto {product_code}: {e}", "code": product_code}
 
+    def _preload_product_information(self, matched_codes_list: List[str]) -> Dict:
+        """Pre-cargar información de productos para evitar búsquedas individuales"""
+        logger.info(f"🔍 Pre-cargando información de {len(matched_codes_list)} productos...")
+
+        product_info = {}
+        try:
+            if not self.odoo_connector.models:
+                return product_info
+
+            # Buscar productos por códigos en batch
+            products = self.odoo_connector.models.execute_kw(
+                self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
+                'product.product', 'search_read',
+                [[['default_code', 'in', matched_codes_list]]],
+                {'fields': ['id', 'default_code', 'product_tmpl_id', 'type']}
+            )
+
+            # Mapear códigos a información
+            for product in products:
+                code = str(product.get('default_code', '')).strip()
+                if code in matched_codes_list:
+                    product_info[code] = {
+                        'product_id': product['id'],
+                        'template_id': product.get('product_tmpl_id', [None])[0],
+                        'type': product.get('type', 'product')
+                    }
+
+            logger.info(f"✅ Información de {len(product_info)} productos precargada")
+            return product_info
+
+        except Exception as e:
+            logger.error(f"❌ Error al pre-cargar información de productos: {e}")
+            return {}
+
+    def _preload_kits_information(self, product_info: Dict) -> set:
+        """Pre-cargar información de KITs en una sola consulta"""
+        logger.info("🧩 Pre-cargando información de KITs...")
+
+        kits_templates = set()
+        try:
+            if not self.odoo_connector.models or not product_info:
+                return kits_templates
+
+            # Extraer template_ids únicos
+            template_ids = list(set(info['template_id'] for info in product_info.values() if info['template_id']))
+
+            if not template_ids:
+                return kits_templates
+
+            # Buscar BOMs en batch
+            boms = self.odoo_connector.models.execute_kw(
+                self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
+                'mrp.bom', 'search_read',
+                [[['product_tmpl_id', 'in', template_ids]]],
+                {'fields': ['product_tmpl_id', 'type']}
+            )
+
+            # Marcar templates que son KITs
+            for bom in boms:
+                kits_templates.add(bom['product_tmpl_id'][0])
+
+            logger.info(f"✅ Identificados {len(kits_templates)} productos KIT")
+            return kits_templates
+
+        except Exception as e:
+            logger.error(f"❌ Error al pre-cargar información de KITs: {e}")
+            return set()
+
+    def _preload_replenishment_rules(self, product_info: Dict) -> Dict:
+        """Pre-cargar reglas de reposición existentes en batch"""
+        logger.info("📋 Pre-cargando reglas de reposición existentes...")
+
+        existing_rules = {}
+        try:
+            if not self.odoo_connector.models or not product_info:
+                return existing_rules
+
+            # Extraer template_ids y product_ids únicos
+            template_ids = list(set(info['template_id'] for info in product_info.values() if info['template_id']))
+            product_ids = [info['product_id'] for info in product_info.values()]
+
+            # Buscar reglas por template_ids
+            rules_by_template = []
+            if template_ids:
+                rules_by_template = self.odoo_connector.models.execute_kw(
+                    self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
+                    'stock.warehouse.orderpoint', 'search_read',
+                    [[['product_tmpl_id', 'in', template_ids]]],
+                    {'fields': ['id', 'product_tmpl_id', 'product_min_qty', 'product_max_qty', 'location_id', 'warehouse_id']}
+                )
+
+            # Buscar reglas por product_ids
+            rules_by_product = []
+            if product_ids:
+                rules_by_product = self.odoo_connector.models.execute_kw(
+                    self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
+                    'stock.warehouse.orderpoint', 'search_read',
+                    [[['product_id', 'in', product_ids]]],
+                    {'fields': ['id', 'product_tmpl_id', 'product_id', 'product_min_qty', 'product_max_qty', 'location_id', 'warehouse_id']}
+                )
+
+            # Combinar y mapear reglas
+            all_rules = rules_by_template + rules_by_product
+            for rule in all_rules:
+                template_id = rule.get('product_tmpl_id', [None])[0] if isinstance(rule.get('product_tmpl_id'), list) else rule.get('product_tmpl_id')
+                if template_id:
+                    if template_id not in existing_rules:
+                        existing_rules[template_id] = []
+                    existing_rules[template_id].append(rule)
+
+            logger.info(f"✅ Pre-cargadas {len(all_rules)} reglas de reposición para {len(existing_rules)} templates")
+            return existing_rules
+
+        except Exception as e:
+            logger.error(f"❌ Error al pre-cargar reglas de reposición: {e}")
+            return {}
+
     def process_matched_products_optimized(self, scraped_products_data: Dict) -> None:
-        """Procesar productos coincidentes usando datos ya scrapeados"""
+        """Procesar productos coincidentes usando datos ya scrapeados CON OPTIMIZACIONES DE CACHE"""
         logger.info(f"🚀 Procesando {len(self.matched_codes)} productos coincidentes SIN nuevo scraping...")
 
         # Configuración inicial
@@ -1259,36 +1655,83 @@ class PrAutoParteScraper:
             # Convertir códigos coincidentes a lista
             matched_codes_list = list(self.matched_codes)
 
-            # Procesamiento por lotes con ThreadPoolExecutor (solo para Odoo)
-            with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-                # Preparar futuros para productos coincidentes
-                future_to_code = {
-                    executor.submit(self._process_matched_product_from_data, code, scraped_products_data): code
-                    for code in matched_codes_list
-                }
+            # 🔥 OPTIMIZACIÓN: Pre-cargar datos estáticos una sola vez si Odoo está conectado
+            cached_data = {}
+            if self.config.send_to_odoo and odoo_connected:
+                logger.info("🚀 Precargando datos estáticos para optimizar rendimiento...")
+                cache_start = datetime.now()
 
-                # Procesar resultados a medida que se completan
-                for future in as_completed(future_to_code):
-                    result = future.result()
+                # 1. Cachear ubicación VLANT/Scraping
+                cached_data['scraping_location_id'] = self.odoo_connector._get_scraping_location()
+                if not cached_data['scraping_location_id']:
+                    logger.error("❌ No se encontró ubicación VLANT/Scraping. Abortando proceso.")
+                    return
+
+                # 2. Cachear proveedor PR Autopartes (Scraping)
+                cached_data['supplier_id'] = self.odoo_connector._get_or_create_supplier()
+                if not cached_data['supplier_id']:
+                    logger.error("❌ No se encontró/creó proveedor PR Autopartes. Abortando proceso.")
+                    return
+
+                # 3. Pre-cargar información de productos para búsquedas batch
+                product_info = self._preload_product_information(matched_codes_list)
+                cached_data['product_info'] = product_info
+
+                # 4. Pre-cargar información de KITs en una sola consulta
+                kits_info = self._preload_kits_information(product_info)
+                cached_data['kits_info'] = kits_info
+
+                # 5. Pre-cargar reglas de reposición existentes
+                existing_rules = self._preload_replenishment_rules(product_info)
+                cached_data['existing_rules'] = existing_rules
+
+                cache_time = datetime.now() - cache_start
+                estimated_savings = len(matched_codes_list) * 4
+                logger.info(f"✅ Datos precargados en {cache_time} - Ahorrando ~{estimated_savings} consultas individuales")
+
+            # 🔥 OPTIMIZACIÓN: Procesamiento con datos cacheados
+            if self.config.send_to_odoo and odoo_connected:
+                # Procesar usando datos cacheados (más eficiente)
+                for code in matched_codes_list:
+                    result = self._process_matched_product_from_data(code, scraped_products_data)
 
                     if result["success"]:
                         total_items += 1
                         successful_products += 1
                         logger.info(f"✅ Producto procesado: {result['code']} - {result['description']}...")
 
-                        # Enviar a Odoo inmediatamente si está conectado
-                        if self.config.send_to_odoo and odoo_connected:
-                            odoo_result = self._send_to_odoo(result["data"])
-                            if odoo_result:
-                                logger.info(f"🌐 Producto {result['code']} actualizado en Odoo")
-                            else:
-                                logger.error(f"❌ Error al enviar {result['code']} a Odoo")
+                        # 🔥 ENVIAR CON DATOS CACHEADOS
+                        odoo_result = self._send_to_odoo_optimized(result["data"], cached_data)
+                        if odoo_result:
+                            logger.info(f"🌐 Producto {result['code']} actualizado en Odoo")
+                        else:
+                            logger.error(f"❌ Error al enviar {result['code']} a Odoo")
                     else:
                         failed_products += 1
                         logger.error(f"❌ {result['error']}")
+            else:
+                # Procesamiento normal sin Odoo ( ThreadPoolExecutor para extracción de datos )
+                with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+                    # Preparar futuros para productos coincidentes
+                    future_to_code = {
+                        executor.submit(self._process_matched_product_from_data, code, scraped_products_data): code
+                        for code in matched_codes_list
+                    }
 
-                    # Pequeña pausa para no sobrecargar Odoo
-                    time.sleep(0.1)
+                    # Procesar resultados a medida que se completan
+                    for future in as_completed(future_to_code):
+                        result = future.result()
+
+                        if result["success"]:
+                            total_items += 1
+                            successful_products += 1
+                            logger.info(f"✅ Producto procesado: {result['code']} - {result['description']}...")
+                        else:
+                            failed_products += 1
+                            logger.error(f"❌ {result['error']}")
+
+                        # Pequeña pausa
+                        time.sleep(0.05)  # Reducido porque no hay llamadas a Odoo
 
             # Estadísticas finales
             end_time = datetime.now()
@@ -1582,8 +2025,8 @@ class PrAutoParteScraper:
 
             merged_df = merged_df[final_columns]
 
-            # Guardar merged CSV
-            merged_path = Path(self.config.output_dir) / "productos_merged.csv"
+            # Guardar merged CSV usando variable de entorno
+            merged_path = self.config.get_merged_output_path()
             merged_df.to_csv(merged_path, index=False, encoding='utf-8')
 
             logger.info(f"✅ Dataset merged creado: {merged_path.name}")
