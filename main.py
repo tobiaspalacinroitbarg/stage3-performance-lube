@@ -244,7 +244,7 @@ class OdooConnector:
 
     def update_matched_product_optimized(self, product_data: Dict, cached_data: Dict) -> Dict:
         """🚀 ACTUALIZAR PRODUCTO USANDO DATOS CACHEADOS - MUCHO MÁS RÁPIDO
-        1. Cargar stock en ubicación VLANTE/Scraping (usando location_id cacheado)
+        1. Cargar stock en ubicación DEPO existencias/Scraping (usando location_id cacheado)
         2. Actualizar info de compra con proveedor cacheado
         3. Establecer regla de reposición (usando reglas cacheadas)
         """
@@ -304,18 +304,18 @@ class OdooConnector:
             return {"success": False, "error": str(e)}
 
     def _update_scraping_stock(self, product_id: int, product_data: Dict) -> Dict:
-        """Actualizar stock del producto en ubicación VLANT/Scraping (siempre, incluso si es 0)"""
+        """Actualizar stock del producto en ubicación DEPO existencias/Scraping (siempre, incluso si es 0)"""
         try:
-            # Buscar ubicación VLANT/Scraping
-            vlante_scraping_location_id = self._get_scraping_location()
-            if not vlante_scraping_location_id:
-                return {"success": False, "error": "Ubicación VLANT/Scraping no encontrada"}
+            # Buscar ubicación DEPO existencias/Scraping
+            depo_scraping_location_id = self._get_depo_scraping_location()
+            if not depo_scraping_location_id:
+                return {"success": False, "error": "Ubicación DEPO existencias/Scraping no encontrada"}
 
             # Obtener disponibilidad del producto (ahora siempre procesamos el valor)
             disponibilidad = product_data.get('disponibilidad', 0)
             stock_quantity = int(disponibilidad) if disponibilidad else 0
 
-            logger.info(f"📦 Actualizando stock en VLANTE/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
+            logger.info(f"📦 Actualizando stock en DEPO existencias/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
 
             # Verificar si el producto es un kit antes de intentar actualizar stock
             try:
@@ -351,7 +351,7 @@ class OdooConnector:
             existing_quants = self.models.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.quant', 'search_read',
-                [[['product_id', '=', product_id], ['location_id', '=', vlante_scraping_location_id]]],
+                [[['product_id', '=', product_id], ['location_id', '=', depo_scraping_location_id]]],
                 {'fields': ['id', 'quantity']}
             )
 
@@ -363,7 +363,7 @@ class OdooConnector:
                     'stock.quant', 'write',
                     [[quant_id], {'quantity': stock_quantity}]
                 )
-                logger.info(f"📦 Stock actualizado en VLANTE/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
+                logger.info(f"📦 Stock actualizado en DEPO existencias/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
             else:
                 # Crear nuevo registro de inventario
                 self.models.execute_kw(
@@ -371,12 +371,12 @@ class OdooConnector:
                     'stock.quant', 'create',
                     [{
                         'product_id': product_id,
-                        'location_id': vlante_scraping_location_id,
+                        'location_id': depo_scraping_location_id,
                         'quantity': stock_quantity,
                         'available_quantity': stock_quantity
                     }]
                 )
-                logger.info(f"📦 Stock creado en VLANTE/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
+                logger.info(f"📦 Stock creado en DEPO existencias/Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
 
             return {"success": True, "quantity": stock_quantity}
 
@@ -471,18 +471,18 @@ class OdooConnector:
                 # Crear nueva regla de reposición
                 logger.info(f"➕ No se encontraron reglas existentes, creando nueva regla...")
 
-                # Buscar ubicación VLANT/Scraping para asociarla a la regla
-                vlante_scraping_location_id = self._get_scraping_location()
-                if not vlante_scraping_location_id:
-                    logger.error(f"❌ No se puede crear regla de reposición sin ubicación VLANT/Scraping")
-                    return {"success": False, "error": "Ubicación VLANT/Scraping no encontrada - no se puede crear regla de reposición"}
+                # Buscar ubicación DEPO existencias/Scraping para asociarla a la regla
+                depo_scraping_location_id = self._get_depo_scraping_location()
+                if not depo_scraping_location_id:
+                    logger.error(f"❌ No se puede crear regla de reposición sin ubicación DEPO existencias/Scraping")
+                    return {"success": False, "error": "Ubicación DEPO existencias/Scraping no encontrada - no se puede crear regla de reposición"}
 
-                logger.info(f"🏭 Usando ubicación ID: {vlante_scraping_location_id}")
+                logger.info(f"🏭 Usando ubicación ID: {depo_scraping_location_id}")
 
                 new_rule_data = {
                     'product_tmpl_id': template_id,
                     'product_id': product_id,
-                    'location_id': vlante_scraping_location_id,
+                    'location_id': depo_scraping_location_id,
                     'product_min_qty': -35,
                     'product_max_qty': -34,
                     'qty_multiple': 1,
@@ -614,7 +614,7 @@ class OdooConnector:
             return {"success": False, "error": str(e)}
 
     def _get_scraping_location(self) -> Optional[int]:
-        """Obtener ID de la ubicación 'Scraping' dentro del almacén VLANTE 2 - FALLA si no encuentra la ubicación exacta"""
+        """Obtener ID de la ubicación 'Scraping' dentro del almacén VLANTE 2 - FUNCIÓN OBSOLETA, usar _get_depo_scraping_location en su lugar"""
         try:
             # Primero buscar el almacén VLANTE 2 por su nombre corto VLANT
             vlante_warehouses = self.models.execute_kw(
@@ -656,7 +656,85 @@ class OdooConnector:
         except Exception as e:
             logger.error(f"❌ Error al buscar ubicación VLANT/Scraping: {e}")
             return None
-  
+
+    def _get_depo_real_location(self) -> Optional[int]:
+        """Obtener ID de la ubicación 'Depo Real' dentro de VLANT/DEPO existencias"""
+        try:
+            # Primero buscar la ubicación padre 'DEPO existencias'
+            depo_existencias_locations = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.location', 'search_read',
+                [[['name', '=', 'DEPO existencias'], ['usage', '=', 'internal']]],
+                {'fields': ['id', 'name', 'complete_name']}
+            )
+
+            if not depo_existencias_locations:
+                logger.error("❌ Ubicación 'DEPO existencias' no encontrada")
+                return None
+
+            depo_existencias = depo_existencias_locations[0]
+            logger.info(f"✅ Ubicación DEPO existencias encontrada: {depo_existencias['complete_name']} (ID: {depo_existencias['id']})")
+
+            # Buscar la ubicación 'Depo Real' dentro de DEPO existencias
+            depo_real_locations = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.location', 'search_read',
+                [[['name', '=', 'Depo Real'], ['usage', '=', 'internal'],
+                  ['location_id', '=', depo_existencias['id']]]],
+                {'fields': ['id', 'name', 'complete_name', 'location_id']}
+            )
+
+            if depo_real_locations:
+                location = depo_real_locations[0]
+                logger.info(f"✅ Ubicación DEPO existencias/Depo Real encontrada: {location['complete_name']} (ID: {location['id']})")
+                return location['id']
+
+            logger.error("❌ Ubicación 'Depo Real' no encontrada dentro de DEPO existencias")
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Error al buscar ubicación DEPO existencias/Depo Real: {e}")
+            return None
+
+    def _get_depo_scraping_location(self) -> Optional[int]:
+        """Obtener ID de la ubicación 'Scraping' dentro de VLANT/DEPO existencias"""
+        try:
+            # Primero buscar la ubicación padre 'DEPO existencias'
+            depo_existencias_locations = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.location', 'search_read',
+                [[['name', '=', 'DEPO existencias'], ['usage', '=', 'internal']]],
+                {'fields': ['id', 'name', 'complete_name']}
+            )
+
+            if not depo_existencias_locations:
+                logger.error("❌ Ubicación 'DEPO existencias' no encontrada")
+                return None
+
+            depo_existencias = depo_existencias_locations[0]
+            logger.info(f"✅ Ubicación DEPO existencias encontrada: {depo_existencias['complete_name']} (ID: {depo_existencias['id']})")
+
+            # Buscar la ubicación 'Scraping' dentro de DEPO existencias
+            scraping_locations = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.location', 'search_read',
+                [[['name', '=', 'Scraping'], ['usage', '=', 'internal'],
+                  ['location_id', '=', depo_existencias['id']]]],
+                {'fields': ['id', 'name', 'complete_name', 'location_id']}
+            )
+
+            if scraping_locations:
+                location = scraping_locations[0]
+                logger.info(f"✅ Ubicación DEPO existencias/Scraping encontrada: {location['complete_name']} (ID: {location['id']})")
+                return location['id']
+
+            logger.error("❌ Ubicación 'Scraping' no encontrada dentro de DEPO existencias")
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Error al buscar ubicación DEPO existencias/Scraping: {e}")
+            return None
+
     def _get_or_create_supplier(self) -> Optional[int]:
         """Obtener o crear proveedor 'PR Autopartes (Scraping)'"""
         try:
@@ -1047,7 +1125,13 @@ class PrAutoParteScraper:
                 logger.error("❌ No se pudo conectar a Odoo para extraer productos")
                 return None
 
-            # Extraer todos los productos
+            # Obtener ubicación Depo Real para extraer stock
+            depo_real_location_id = self.odoo_connector._get_depo_real_location()
+            if not depo_real_location_id:
+                logger.error("❌ No se encontró ubicación DEPO existencias/Depo Real")
+                return None
+
+            # Extraer todos los productos sin stock primero
             products_data = self.odoo_connector.models.execute_kw(
                 self.odoo_connector.db,
                 self.odoo_connector.uid,
@@ -1057,7 +1141,7 @@ class PrAutoParteScraper:
                 {
                     'fields': [
                         'id', 'default_code', 'name', 'list_price', 'standard_price',
-                        'qty_available', 'virtual_available', 'type', 'sale_ok', 'purchase_ok'
+                        'type', 'sale_ok', 'purchase_ok'
                     ]
                 }
             )
@@ -1065,6 +1149,29 @@ class PrAutoParteScraper:
             if not products_data:
                 logger.warning("⚠️ No se encontraron productos en Odoo")
                 return pd.DataFrame()
+
+            # Obtener stock para cada producto desde Depo Real
+            logger.info("📊 Obteniendo stock desde DEPO existencias/Depo Real...")
+            product_ids = [p['id'] for p in products_data]
+
+            # Buscar stock quants para todos los productos en Depo Real
+            stock_quants = self.odoo_connector.models.execute_kw(
+                self.odoo_connector.db,
+                self.odoo_connector.uid,
+                self.odoo_connector.password,
+                'stock.quant', 'search_read',
+                [[['product_id', 'in', product_ids], ['location_id', '=', depo_real_location_id]]],
+                {'fields': ['product_id', 'quantity']}
+            )
+
+            # Crear diccionario de stock por producto
+            stock_by_product = {sq['product_id'][0]: sq['quantity'] for sq in stock_quants}
+
+            # Agregar stock a cada producto
+            for product in products_data:
+                product_id = product['id']
+                product['qty_available'] = stock_by_product.get(product_id, 0)
+                product['virtual_available'] = stock_by_product.get(product_id, 0)  # Mismo valor para virtual
 
             # Convertir a DataFrame
             df = pd.DataFrame(products_data)
@@ -1661,10 +1768,10 @@ class PrAutoParteScraper:
                 logger.info("🚀 Precargando datos estáticos para optimizar rendimiento...")
                 cache_start = datetime.now()
 
-                # 1. Cachear ubicación VLANT/Scraping
-                cached_data['scraping_location_id'] = self.odoo_connector._get_scraping_location()
+                # 1. Cachear ubicación DEPO existencias/Scraping
+                cached_data['scraping_location_id'] = self.odoo_connector._get_depo_scraping_location()
                 if not cached_data['scraping_location_id']:
-                    logger.error("❌ No se encontró ubicación VLANT/Scraping. Abortando proceso.")
+                    logger.error("❌ No se encontró ubicación DEPO existencias/Scraping. Abortando proceso.")
                     return
 
                 # 2. Cachear proveedor PR Autopartes (Scraping)
