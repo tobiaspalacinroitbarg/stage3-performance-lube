@@ -1017,6 +1017,8 @@ class PrAutoParteScraper:
         # Inicializar conector Odoo
         self.odoo_connector = OdooConnector(config)
 
+        # Mapeo: código scraping → código Odoo (para usar código Odoo al actualizar)
+        self.scraping_to_odoo_code: Dict[str, str] = {}
         # Cargar códigos coincidentes del dataset de productos
         self.matched_codes = self._load_matched_codes()
     
@@ -1072,22 +1074,24 @@ class PrAutoParteScraper:
 
             # Obtener códigos de productos (Referencia interna/default_code)
             codigos_productos = set()
-            codigos_productos_norm = set()
+            codigos_productos_norm = {}  # Cambiado a dict para mapear normalized -> original
 
             if 'default_code' in df_productos.columns:
                 df_productos_clean = df_productos.dropna(subset=['default_code'])
                 for code in df_productos_clean['default_code']:
+                    original_code = str(code).strip()
                     normalized_code = CodeNormalizer.normalize_code(code)
                     if normalized_code:  # Solo agregar si no está vacío después de normalizar
-                        codigos_productos.add(str(code).strip())
-                        codigos_productos_norm.add(normalized_code)
+                        codigos_productos.add(original_code)
+                        codigos_productos_norm[normalized_code] = original_code
             elif 'Referencia interna' in df_productos.columns:
                 df_productos_clean = df_productos.dropna(subset=['Referencia interna'])
                 for code in df_productos_clean['Referencia interna']:
+                    original_code = str(code).strip()
                     normalized_code = CodeNormalizer.normalize_code(code)
                     if normalized_code:
-                        codigos_productos.add(str(code).strip())
-                        codigos_productos_norm.add(normalized_code)
+                        codigos_productos.add(original_code)
+                        codigos_productos_norm[normalized_code] = original_code
 
             # Obtener códigos de artículos con normalización
             codigos_articulos = set()
@@ -1109,7 +1113,12 @@ class PrAutoParteScraper:
             matched_codes_normalized = set()
             for norm_codigo in codigos_productos_norm:
                 if norm_codigo in codigos_articulos_norm:
-                    matched_codes_normalized.add(codigos_articulos_norm[norm_codigo])
+                    # Guardar el código del scraping (para buscar en scraped_data)
+                    scraping_code = codigos_articulos_norm[norm_codigo]
+                    odoo_code = codigos_productos_norm[norm_codigo]
+                    matched_codes_normalized.add(scraping_code)
+                    # Crear mapeo para usar código Odoo al actualizar
+                    self.scraping_to_odoo_code[scraping_code] = odoo_code
 
             # Combinar ambos sets de coincidencias
             matched_codes = matched_codes_exact.union(matched_codes_normalized)
@@ -1657,23 +1666,38 @@ class PrAutoParteScraper:
             if not self.odoo_connector.models:
                 return product_info
 
-            # Buscar productos por códigos en batch
+            # Convertir códigos del scraping a códigos de Odoo usando el mapeo
+            odoo_codes_list = []
+            scraping_to_odoo_local = {}  # Mapeo local: scraping_code → odoo_code
+            for scraping_code in matched_codes_list:
+                odoo_code = self.scraping_to_odoo_code.get(scraping_code, scraping_code)
+                odoo_codes_list.append(odoo_code)
+                scraping_to_odoo_local[scraping_code] = odoo_code
+
+            # Buscar productos por códigos de Odoo en batch
             products = self.odoo_connector.models.execute_kw(
                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                 'product.product', 'search_read',
-                [[['default_code', 'in', matched_codes_list]]],
+                [[['default_code', 'in', odoo_codes_list]]],
                 {'fields': ['id', 'default_code', 'product_tmpl_id', 'type']}
             )
 
-            # Mapear códigos a información
+            # Mapear códigos del scraping a información (usando código de Odoo para lookup)
+            odoo_code_to_info = {}
             for product in products:
-                code = str(product.get('default_code', '')).strip()
-                if code in matched_codes_list:
-                    product_info[code] = {
-                        'product_id': product['id'],
-                        'template_id': product.get('product_tmpl_id', [None])[0],
-                        'type': product.get('type', 'product')
-                    }
+                odoo_code = str(product.get('default_code', '')).strip()
+                odoo_code_to_info[odoo_code] = {
+                    'product_id': product['id'],
+                    'template_id': product.get('product_tmpl_id', [None])[0],
+                    'type': product.get('type', 'product'),
+                    'odoo_code': odoo_code
+                }
+
+            # Crear product_info indexado por código del scraping
+            for scraping_code in matched_codes_list:
+                odoo_code = scraping_to_odoo_local.get(scraping_code, scraping_code)
+                if odoo_code in odoo_code_to_info:
+                    product_info[scraping_code] = odoo_code_to_info[odoo_code]
 
             logger.info(f"✅ Información de {len(product_info)} productos precargada")
             return product_info
