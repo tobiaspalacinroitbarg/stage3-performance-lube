@@ -132,6 +132,51 @@ class OdooConnector:
         self.password = config.odoo_password
         self.uid = None
         self.models = None
+        # Configuración de reintentos para manejar rate limiting
+        self.max_retries = 5
+        self.initial_retry_delay = 2.0  # segundos
+
+    def _execute_with_retry(self, func, *args, **kwargs):
+        """Ejecutar función de Odoo con reintentos y backoff exponencial"""
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                error_msg = str(e)
+
+                # Verificar si es error de rate limiting (429) o error de conexión
+                is_rate_limit = '429' in error_msg or 'Too Many Requests' in error_msg
+                is_connection_error = ('Connection' in error_msg or 'timeout' in error_msg.lower() or
+                                      'Temporally' in error_msg or 'temporarily' in error_msg.lower())
+
+                if is_rate_limit or is_connection_error:
+                    if attempt < self.max_retries - 1:
+                        # Backoff exponencial: 2s, 4s, 8s, 16s, 32s
+                        delay = self.initial_retry_delay * (2 ** attempt)
+                        logger.warning(f"⚠️ Rate limit detectado (intento {attempt + 1}/{self.max_retries}). "
+                                     f"Esperando {delay}s antes de reintentar...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"❌ Máximo de reintentos alcanzado para llamada Odoo")
+
+                # Si no es rate limit o es el último intento, propagar el error
+                raise
+
+        # Si llegamos aquí, todos los reintentos fallaron
+        raise last_error
+
+    def execute_kw(self, db, uid, password, model, method, domain, kwargs_dict=None):
+        """Wrapper para execute_kw con reintentos automáticos para rate limiting"""
+        if kwargs_dict is None:
+            kwargs_dict = {}
+
+        def _do_execute():
+            return self.models.execute_kw(db, uid, password, model, method, domain, kwargs_dict)
+
+        return self._execute_with_retry(_do_execute)
 
     def connect(self) -> bool:
         """Establecer conexión con Odoo"""
@@ -919,7 +964,7 @@ class OdooConnector:
                         'partner_id': supplier_id,
                         'price': float(precio_costo),
                         'min_qty': 1,
-                        'delay': 3
+                        'delay': 7
                     }]
                 )
                 logger.info(f"💰 Info de compra creada cacheado: {product_code} - ${precio_costo}")
@@ -1276,7 +1321,7 @@ class OdooConnector:
                         'partner_id': supplier_id,
                         'price': price,
                         'min_qty': 1,
-                        'delay': 3
+                        'delay': 7
                     })
 
                 try:
@@ -1301,7 +1346,7 @@ class OdooConnector:
                                     'partner_id': supplier_id,
                                     'price': price,
                                     'min_qty': 1,
-                                    'delay': 3
+                                    'delay': 7
                                 }]
                             )
                             results["created"].append(code)
@@ -2205,8 +2250,8 @@ class PrAutoParteScraper:
                 odoo_codes_list.append(odoo_code)
                 scraping_to_odoo_local[scraping_code] = odoo_code
 
-            # Buscar productos por códigos de Odoo en batch
-            products = self.odoo_connector.models.execute_kw(
+            # Buscar productos por códigos de Odoo en batch (con reintentos automáticos)
+            products = self.odoo_connector.execute_kw(
                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                 'product.product', 'search_read',
                 [[['default_code', 'in', odoo_codes_list]]],
@@ -2253,8 +2298,8 @@ class PrAutoParteScraper:
             if not template_ids:
                 return kits_templates
 
-            # Buscar BOMs en batch
-            boms = self.odoo_connector.models.execute_kw(
+            # Buscar BOMs en batch (con reintentos automáticos)
+            boms = self.odoo_connector.execute_kw(
                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                 'mrp.bom', 'search_read',
                 [[['product_tmpl_id', 'in', template_ids]]],
@@ -2285,20 +2330,20 @@ class PrAutoParteScraper:
             template_ids = list(set(info['template_id'] for info in product_info.values() if info['template_id']))
             product_ids = [info['product_id'] for info in product_info.values()]
 
-            # Buscar reglas por template_ids
+            # Buscar reglas por template_ids (con reintentos automáticos)
             rules_by_template = []
             if template_ids:
-                rules_by_template = self.odoo_connector.models.execute_kw(
+                rules_by_template = self.odoo_connector.execute_kw(
                     self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                     'stock.warehouse.orderpoint', 'search_read',
                     [[['product_tmpl_id', 'in', template_ids]]],
                     {'fields': ['id', 'product_tmpl_id', 'product_min_qty', 'product_max_qty', 'location_id', 'warehouse_id']}
                 )
 
-            # Buscar reglas por product_ids
+            # Buscar reglas por product_ids (con reintentos automáticos)
             rules_by_product = []
             if product_ids:
-                rules_by_product = self.odoo_connector.models.execute_kw(
+                rules_by_product = self.odoo_connector.execute_kw(
                     self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                     'stock.warehouse.orderpoint', 'search_read',
                     [[['product_id', 'in', product_ids]]],
