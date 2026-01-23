@@ -792,11 +792,11 @@ class OdooConnector:
                     'supplier_rank': 1,
                     'customer_rank': 0,
                     'is_company': True,
-                    'street': 'Obtenido por scraping web',
-                    'city': 'Web',
+                    'street': 'Fray Luis Beltrán 2121',
+                    'city': 'Bs As (B1714HSK) Ituzaingó',
                     'country_id': 10,  # Argentina (ajustar según configuración)
-                    'email': 'scraping@prautopartes.com',
-                    'phone': 'N/A',
+                    'email': 'prautopartes@gmail.com',
+                    'phone': '54 11 2076-7025',
                     'comment': 'Proveedor automático generado por sistema de scraping - PR Autopartes'
                 }]
             )
@@ -992,6 +992,530 @@ class OdooConnector:
 
         except Exception as e:
             logger.error(f"❌ Error al actualizar regla cacheada: {e}")
+            return {"success": False, "error": str(e)}
+
+    # ========================================================================
+    # 🚀 MÉTODOS BATCH PARA ACTUALIZACIONES MASIVAS - MÁXIMO RENDIMIENTO
+    # ========================================================================
+
+    def _preload_existing_quants(self, product_ids: List[int], location_id: int) -> Dict[int, Dict]:
+        """Pre-cargar quants existentes para todos los productos en una sola consulta"""
+        try:
+            if not self.models or not product_ids:
+                return {}
+
+            quants = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.quant', 'search_read',
+                [[['product_id', 'in', product_ids], ['location_id', '=', location_id]]],
+                {'fields': ['id', 'product_id', 'quantity']}
+            )
+
+            # Mapear product_id -> quant info
+            quants_by_product = {}
+            for quant in quants:
+                product_id = quant['product_id'][0]
+                quants_by_product[product_id] = quant
+
+            return quants_by_product
+
+        except Exception as e:
+            logger.error(f"Error al pre-cargar quants: {e}")
+            return {}
+
+    def _batch_update_stock_quants(self, products_data: List[Tuple[str, Dict]], cached_data: Dict) -> Dict[str, List]:
+        """Actualizar stock de múltiples productos en batch
+        Returns: Dict con listas de IDs actualizados/creados y productos con errores
+        """
+        results = {
+            "updated": [],
+            "created": [],
+            "kits_skipped": [],
+            "errors": []
+        }
+
+        try:
+            location_id = cached_data['scraping_location_id']
+            kits_info = cached_data['kits_info']
+            product_info = cached_data['product_info']
+
+            # Extraer product_ids y preparar mapeo
+            product_ids = []
+            product_id_to_data = {}
+            product_id_to_scraping_code = {}
+
+            for scraping_code, data in products_data:
+                info = product_info.get(scraping_code)
+                if not info:
+                    results["errors"].append({"code": scraping_code, "error": "Producto no encontrado en cache"})
+                    continue
+
+                product_id = info['product_id']
+                template_id = info['template_id']
+
+                # Verificar si es KIT
+                if template_id in kits_info:
+                    results["kits_skipped"].append(scraping_code)
+                    logger.warning(f"⚠️ Producto {scraping_code} es un kit (cacheado). Saltando actualización de stock.")
+                    continue
+
+                product_ids.append(product_id)
+                product_id_to_data[product_id] = data
+                product_id_to_scraping_code[product_id] = scraping_code
+
+            if not product_ids:
+                logger.warning("⚠️ No hay productos válidos para actualizar stock")
+                return results
+
+            # Pre-cargar quants existentes en una sola consulta
+            logger.info(f"📦 Pre-cargando quants existentes para {len(product_ids)} productos...")
+            existing_quants = self._preload_existing_quants(product_ids, location_id)
+
+            # Preparar operaciones batch
+            quants_to_update = []  # List of (quant_id, quantity, code)
+            quants_to_create = []  # List of (product_id, quantity, code)
+
+            for product_id in product_ids:
+                scraping_code = product_id_to_scraping_code[product_id]
+                data = product_id_to_data[product_id]
+
+                disponibilidad = data.get('disponibilidad', 0)
+                stock_quantity = int(disponibilidad) if disponibilidad else 0
+
+                if product_id in existing_quants:
+                    # Actualizar quant existente
+                    quant_id = existing_quants[product_id]['id']
+                    quants_to_update.append((quant_id, stock_quantity, scraping_code))
+                else:
+                    # Crear nuevo quant
+                    quants_to_create.append((product_id, stock_quantity, scraping_code))
+
+            # Ejecutar actualizaciones en batch
+            if quants_to_update:
+                logger.info(f"🔄 Actualizando {len(quants_to_update)} quants existentes en batch...")
+                for quant_id, quantity, code in quants_to_update:
+                    try:
+                        self.models.execute_kw(
+                            self.db, self.uid, self.password,
+                            'stock.quant', 'write',
+                            [[quant_id], {'quantity': quantity}]
+                        )
+                        results["updated"].append(code)
+                    except Exception as e:
+                        results["errors"].append({"code": code, "error": str(e)})
+
+            # Crear nuevos quants en batch
+            if quants_to_create:
+                logger.info(f"➕ Creando {len(quants_to_create)} nuevos quants en batch...")
+                quant_records = []
+                for product_id, quantity, code in quants_to_create:
+                    quant_records.append({
+                        'product_id': product_id,
+                        'location_id': location_id,
+                        'quantity': quantity,
+                        'available_quantity': quantity
+                    })
+
+                try:
+                    # Crear todos los quants en una sola llamada
+                    created_ids = self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'stock.quant', 'create',
+                        [quant_records]
+                    )
+                    results["created"].extend([code for _, _, code in quants_to_create])
+                    logger.info(f"✅ {len(created_ids)} quants creados exitosamente")
+                except Exception as e:
+                    logger.error(f"❌ Error al crear quants en batch: {e}")
+                    # Fallback: crear individualmente
+                    for product_id, quantity, code in quants_to_create:
+                        try:
+                            self.models.execute_kw(
+                                self.db, self.uid, self.password,
+                                'stock.quant', 'create',
+                                [{
+                                    'product_id': product_id,
+                                    'location_id': location_id,
+                                    'quantity': quantity,
+                                    'available_quantity': quantity
+                                }]
+                            )
+                            results["created"].append(code)
+                        except Exception as e2:
+                            results["errors"].append({"code": code, "error": str(e2)})
+
+            logger.info(f"📦 Resumen batch stock: {len(results['updated'])} actualizados, {len(results['created'])} creados, {len(results['kits_skipped'])} kits saltados, {len(results['errors'])} errores")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Error en batch update de stock: {e}")
+            results["errors"].append({"code": "batch", "error": str(e)})
+            return results
+
+    def _preload_existing_sellers(self, template_ids: List[int], supplier_id: int) -> Dict[int, Dict]:
+        """Pre-cargar sellers existentes para todos los templates en una sola consulta"""
+        try:
+            if not self.models or not template_ids:
+                return {}
+
+            sellers = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'product.supplierinfo', 'search_read',
+                [[['product_tmpl_id', 'in', template_ids], ['partner_id', '=', supplier_id]]],
+                {'fields': ['id', 'product_tmpl_id', 'price']}
+            )
+
+            # Mapear template_id -> seller info
+            sellers_by_template = {}
+            for seller in sellers:
+                template_id = seller['product_tmpl_id'][0]
+                sellers_by_template[template_id] = seller
+
+            return sellers_by_template
+
+        except Exception as e:
+            logger.error(f"Error al pre-cargar sellers: {e}")
+            return {}
+
+    def _batch_update_supplierinfo(self, products_data: List[Tuple[str, Dict]], cached_data: Dict) -> Dict[str, List]:
+        """Actualizar información de compra de múltiples productos en batch
+        Returns: Dict con listas de IDs actualizados/creados y productos con errores
+        """
+        results = {
+            "updated": [],
+            "created": [],
+            "errors": []
+        }
+
+        try:
+            supplier_id = cached_data['supplier_id']
+            product_info = cached_data['product_info']
+
+            # Extraer template_ids y preparar mapeo
+            template_ids = []
+            template_id_to_data = {}
+            template_id_to_scraping_code = {}
+
+            for scraping_code, data in products_data:
+                info = product_info.get(scraping_code)
+                if not info:
+                    results["errors"].append({"code": scraping_code, "error": "Producto no encontrado en cache"})
+                    continue
+
+                template_id = info['template_id']
+                template_ids.append(template_id)
+                template_id_to_data[template_id] = (data, scraping_code)
+                template_id_to_scraping_code[template_id] = scraping_code
+
+            if not template_ids:
+                logger.warning("⚠️ No hay productos válidos para actualizar supplierinfo")
+                return results
+
+            # Pre-cargar sellers existentes en una sola consulta
+            logger.info(f"🛒 Pre-cargando sellers existentes para {len(template_ids)} templates...")
+            existing_sellers = self._preload_existing_sellers(template_ids, supplier_id)
+
+            # Preparar operaciones batch
+            sellers_to_update = []  # List of (seller_id, price, code)
+            sellers_to_create = []  # List of (template_id, price, code, product_code, product_name)
+
+            for template_id in template_ids:
+                data, scraping_code = template_id_to_data[template_id]
+
+                precio_costo = float(data.get('precioCosto', 0))
+                product_code = data.get('codigo', '').strip()
+                product_name = data.get('descripcion', '').strip()[:100]
+
+                if template_id in existing_sellers:
+                    # Verificar si necesita actualización
+                    seller = existing_sellers[template_id]
+                    if float(seller['price']) != precio_costo:
+                        sellers_to_update.append((seller['id'], precio_costo, scraping_code))
+                else:
+                    sellers_to_create.append((template_id, precio_costo, scraping_code, product_code, product_name))
+
+            # Ejecutar actualizaciones en batch
+            if sellers_to_update:
+                logger.info(f"🔄 Actualizando {len(sellers_to_update)} sellers existentes en batch...")
+                # Odoo no soporta batch write con diferentes valores en una sola llamada
+                # Pero podemos agrupar por precio
+                price_to_ids = {}
+                for seller_id, price, code in sellers_to_update:
+                    if price not in price_to_ids:
+                        price_to_ids[price] = []
+                    price_to_ids[price].append((seller_id, code))
+
+                for price, items in price_to_ids.items():
+                    ids_to_update = [item[0] for item in items]
+                    codes = [item[1] for item in items]
+                    try:
+                        self.models.execute_kw(
+                            self.db, self.uid, self.password,
+                            'product.supplierinfo', 'write',
+                            [ids_to_update, {'price': price}]
+                        )
+                        results["updated"].extend(codes)
+                    except Exception as e:
+                        for code in codes:
+                            results["errors"].append({"code": code, "error": str(e)})
+
+            # Crear nuevos sellers en batch
+            if sellers_to_create:
+                logger.info(f"➕ Creando {len(sellers_to_create)} nuevos sellers en batch...")
+                seller_records = []
+                for template_id, price, code, product_code, product_name in sellers_to_create:
+                    seller_records.append({
+                        'product_tmpl_id': template_id,
+                        'partner_id': supplier_id,
+                        'price': price,
+                        'min_qty': 1,
+                        'delay': 7
+                    })
+
+                try:
+                    # Crear todos los sellers en una sola llamada
+                    created_ids = self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'product.supplierinfo', 'create',
+                        [seller_records]
+                    )
+                    results["created"].extend([code for _, _, code, _, _ in sellers_to_create])
+                    logger.info(f"✅ {len(created_ids)} sellers creados exitosamente")
+                except Exception as e:
+                    logger.error(f"❌ Error al crear sellers en batch: {e}")
+                    # Fallback: crear individualmente
+                    for template_id, price, code, product_code, product_name in sellers_to_create:
+                        try:
+                            self.models.execute_kw(
+                                self.db, self.uid, self.password,
+                                'product.supplierinfo', 'create',
+                                [{
+                                    'product_tmpl_id': template_id,
+                                    'partner_id': supplier_id,
+                                    'price': price,
+                                    'min_qty': 1,
+                                    'delay': 7
+                                }]
+                            )
+                            results["created"].append(code)
+                        except Exception as e2:
+                            results["errors"].append({"code": code, "error": str(e2)})
+
+            logger.info(f"🛒 Resumen batch supplierinfo: {len(results['updated'])} actualizados, {len(results['created'])} creados, {len(results['errors'])} errores")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Error en batch update de supplierinfo: {e}")
+            results["errors"].append({"code": "batch", "error": str(e)})
+            return results
+
+    def _batch_update_replenishment_rules(self, products_data: List[Tuple[str, Dict]], cached_data: Dict) -> Dict[str, List]:
+        """Actualizar reglas de reposición de múltiples productos en batch
+        Returns: Dict con listas de IDs actualizados/creados y productos con errores
+        """
+        results = {
+            "updated": [],
+            "created": [],
+            "errors": []
+        }
+
+        try:
+            location_id = cached_data['scraping_location_id']
+            existing_rules = cached_data['existing_rules']
+            product_info = cached_data['product_info']
+
+            # Preparar operaciones batch
+            rules_to_update = []  # List of (rule_id, code)
+            rules_to_create = []  # List of (template_id, product_id, code, product_code)
+
+            for scraping_code, data in products_data:
+                info = product_info.get(scraping_code)
+                if not info:
+                    results["errors"].append({"code": scraping_code, "error": "Producto no encontrado en cache"})
+                    continue
+
+                template_id = info['template_id']
+                product_id = info['product_id']
+                product_code = scraping_code
+
+                template_rules = existing_rules.get(template_id, [])
+
+                if template_rules:
+                    # Actualizar regla existente
+                    rule_id = template_rules[0]['id']
+                    rules_to_update.append((rule_id, scraping_code))
+                else:
+                    # Crear nueva regla
+                    rules_to_create.append((template_id, product_id, scraping_code, product_code))
+
+            # Ejecutar actualizaciones en batch
+            if rules_to_update:
+                logger.info(f"🔄 Actualizando {len(rules_to_update)} reglas de reposición existentes en batch...")
+                # Agrupar actualizaciones
+                rule_ids = [rule_id for rule_id, _ in rules_to_update]
+                codes = [code for _, code in rules_to_update]
+
+                try:
+                    # Actualizar todas las reglas con los mismos valores en batch
+                    self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'stock.warehouse.orderpoint', 'write',
+                        [rule_ids, {
+                            'product_min_qty': -35,
+                            'product_max_qty': -34
+                        }]
+                    )
+                    results["updated"].extend(codes)
+                    logger.info(f"✅ {len(rule_ids)} reglas actualizadas exitosamente")
+                except Exception as e:
+                    logger.error(f"❌ Error al actualizar reglas en batch: {e}")
+                    # Fallback: actualizar individualmente
+                    for rule_id, code in rules_to_update:
+                        try:
+                            self.models.execute_kw(
+                                self.db, self.uid, self.password,
+                                'stock.warehouse.orderpoint', 'write',
+                                [[rule_id], {
+                                    'product_min_qty': -35,
+                                    'product_max_qty': -34
+                                }]
+                            )
+                            results["updated"].append(code)
+                        except Exception as e2:
+                            results["errors"].append({"code": code, "error": str(e2)})
+
+            # Crear nuevas reglas en batch
+            if rules_to_create:
+                logger.info(f"➕ Creando {len(rules_to_create)} nuevas reglas de reposición en batch...")
+                rule_records = []
+                for template_id, product_id, code, product_code in rules_to_create:
+                    rule_records.append({
+                        'product_tmpl_id': template_id,
+                        'product_id': product_id,
+                        'location_id': location_id,
+                        'product_min_qty': -35,
+                        'product_max_qty': -34,
+                        'qty_multiple': 1,
+                        'name': f"Rule {product_code} - VLANTE"
+                    })
+
+                try:
+                    # Crear todas las reglas en una sola llamada
+                    created_ids = self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'stock.warehouse.orderpoint', 'create',
+                        [rule_records]
+                    )
+                    results["created"].extend([code for _, _, code, _ in rules_to_create])
+                    logger.info(f"✅ {len(created_ids)} reglas creadas exitosamente")
+                except Exception as e:
+                    logger.error(f"❌ Error al crear reglas en batch: {e}")
+                    # Fallback: crear individualmente
+                    for template_id, product_id, code, product_code in rules_to_create:
+                        try:
+                            self.models.execute_kw(
+                                self.db, self.uid, self.password,
+                                'stock.warehouse.orderpoint', 'create',
+                                [{
+                                    'product_tmpl_id': template_id,
+                                    'product_id': product_id,
+                                    'location_id': location_id,
+                                    'product_min_qty': -35,
+                                    'product_max_qty': -34,
+                                    'qty_multiple': 1,
+                                    'name': f"Rule {product_code} - VLANTE"
+                                }]
+                            )
+                            results["created"].append(code)
+                        except Exception as e2:
+                            results["errors"].append({"code": code, "error": str(e2)})
+
+            logger.info(f"📋 Resumen batch replenishment: {len(results['updated'])} actualizados, {len(results['created'])} creados, {len(results['errors'])} errores")
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ Error en batch update de replenishment rules: {e}")
+            results["errors"].append({"code": "batch", "error": str(e)})
+            return results
+
+    def update_matched_products_batch(self, products_data: List[Tuple[str, Dict]], cached_data: Dict) -> Dict:
+        """🚀 ACTUALIZAR MÚLTIPLES PRODUCTOS EN BATCH - MÁXIMA OPTIMIZACIÓN
+        Args:
+            products_data: List of tuples (scraping_code, product_data)
+            cached_data: Dict con datos cacheados (location_id, supplier_id, product_info, kits_info, existing_rules)
+
+        Realiza todas las actualizaciones en batch:
+        1. Stock (stock.quant) para todos los productos
+        2. Info de compra (product.supplierinfo) para todos los productos
+        3. Reglas de reposición (stock.warehouse.orderpoint) para todos los productos
+        """
+        if not self.models:
+            return {"success": False, "error": "No conectado a Odoo"}
+
+        logger.info(f"🚀 Iniciando actualización BATCH de {len(products_data)} productos...")
+
+        start_time = datetime.now()
+        overall_results = {
+            "success": True,
+            "total_products": len(products_data),
+            "stock": {},
+            "supplierinfo": {},
+            "replenishment": {},
+            "errors": []
+        }
+
+        try:
+            # 1. Batch update de stock
+            logger.info("📦 Fase 1/3: Actualizando stock en batch...")
+            stock_results = self._batch_update_stock_quants(products_data, cached_data)
+            overall_results["stock"] = stock_results
+
+            # 2. Batch update de supplierinfo
+            logger.info("🛒 Fase 2/3: Actualizando info de compra en batch...")
+            supplier_results = self._batch_update_supplierinfo(products_data, cached_data)
+            overall_results["supplierinfo"] = supplier_results
+
+            # 3. Batch update de reglas de reposición
+            logger.info("📋 Fase 3/3: Actualizando reglas de reposición en batch...")
+            replenishment_results = self._batch_update_replenishment_rules(products_data, cached_data)
+            overall_results["replenishment"] = replenishment_results
+
+            # Calcular estadísticas finales
+            duration = datetime.now() - start_time
+
+            successful_products = len(set(
+                stock_results.get("updated", []) + stock_results.get("created", []) +
+                supplier_results.get("updated", []) + supplier_results.get("created", []) +
+                replenishment_results.get("updated", []) + replenishment_results.get("created", [])
+            ))
+
+            total_errors = (
+                len(stock_results.get("errors", [])) +
+                len(supplier_results.get("errors", [])) +
+                len(replenishment_results.get("errors", []))
+            )
+
+            logger.info("✅ Actualización BATCH completada!")
+            logger.info(f"   📊 Productos procesados: {len(products_data)}")
+            logger.info(f"   📦 Stock: {len(stock_results.get('updated', []))} actualizados, {len(stock_results.get('created', []))} creados, {len(stock_results.get('kits_skipped', []))} kits saltados")
+            logger.info(f"   🛒 Supplierinfo: {len(supplier_results.get('updated', []))} actualizados, {len(supplier_results.get('created', []))} creados")
+            logger.info(f"   📋 Replenishment: {len(replenishment_results.get('updated', []))} actualizados, {len(replenishment_results.get('created', []))} creados")
+            logger.info(f"   ⏱️  Tiempo total: {duration}")
+            logger.info(f"   🚀 Velocidad: {len(products_data)/duration.total_seconds():.2f} productos/segundo")
+            logger.info(f"   🔥 AHORRO: ~{len(products_data) * 6} llamadas XML-RPC individuales evitadas")
+
+            if total_errors > 0:
+                overall_results["errors"] = (
+                    stock_results.get("errors", []) +
+                    supplier_results.get("errors", []) +
+                    replenishment_results.get("errors", [])
+                )
+                logger.warning(f"   ⚠️ Errores totales: {total_errors}")
+
+            return overall_results
+
+        except Exception as e:
+            logger.error(f"❌ Error crítico en actualización BATCH: {e}")
             return {"success": False, "error": str(e)}
 
 
@@ -1852,26 +2376,53 @@ class PrAutoParteScraper:
                 estimated_savings = len(matched_codes_list) * 4
                 logger.info(f"✅ Datos precargados en {cache_time} - Ahorrando ~{estimated_savings} consultas individuales")
 
-            # 🔥 OPTIMIZACIÓN: Procesamiento con datos cacheados
+            # 🔥 OPTIMIZACIÓN: Procesamiento BATCH con datos cacheados
             if self.config.send_to_odoo and odoo_connected:
-                # Procesar usando datos cacheados (más eficiente)
+                # 🚀 NUEVA IMPLEMENTACIÓN: Procesar todo en BATCH en lugar de uno por uno
+                logger.info("🚀 Preparando productos para actualización BATCH...")
+
+                # Recolectar todos los datos de productos en formato batch
+                products_data_batch = []
                 for code in matched_codes_list:
                     result = self._process_matched_product_from_data(code, scraped_products_data)
-
                     if result["success"]:
+                        products_data_batch.append((code, result["data"]))
                         total_items += 1
-                        successful_products += 1
-                        logger.info(f"✅ Producto procesado: {result['code']} - {result['description']}...")
-
-                        # 🔥 ENVIAR CON DATOS CACHEADOS
-                        odoo_result = self._send_to_odoo_optimized(result["data"], cached_data)
-                        if odoo_result:
-                            logger.info(f"🌐 Producto {result['code']} actualizado en Odoo")
-                        else:
-                            logger.error(f"❌ Error al enviar {result['code']} a Odoo")
                     else:
                         failed_products += 1
                         logger.error(f"❌ {result['error']}")
+
+                if products_data_batch:
+                    logger.info(f"📦 Enviando {len(products_data_batch)} productos a Odoo en BATCH...")
+                    # 🚀 ACTUALIZACIÓN BATCH - Una sola llamada para todos los productos
+                    batch_result = self.odoo_connector.update_matched_products_batch(products_data_batch, cached_data)
+
+                    if batch_result.get("success"):
+                        successful_products = len(products_data_batch) - len(batch_result.get("errors", []))
+
+                        # Log detallado de resultados
+                        stock_results = batch_result.get("stock", {})
+                        supplier_results = batch_result.get("supplierinfo", {})
+                        replenishment_results = batch_result.get("replenishment", {})
+
+                        logger.info("📊 Resumen de actualización BATCH:")
+                        logger.info(f"   📦 Stock: {len(stock_results.get('updated', []))} actualizados, {len(stock_results.get('created', []))} creados")
+                        logger.info(f"   🛒 Supplierinfo: {len(supplier_results.get('updated', []))} actualizados, {len(supplier_results.get('created', []))} creados")
+                        logger.info(f"   📋 Replenishment: {len(replenishment_results.get('updated', []))} actualizados, {len(replenishment_results.get('created', []))} creados")
+
+                        # Mostrar errores si hubo
+                        all_errors = batch_result.get("errors", [])
+                        if all_errors:
+                            logger.warning(f"⚠️ {len(all_errors)} productos con errores:")
+                            for error in all_errors[:10]:  # Mostrar solo los primeros 10 errores
+                                logger.warning(f"   - {error.get('code', 'unknown')}: {error.get('error', 'unknown')}")
+                            if len(all_errors) > 10:
+                                logger.warning(f"   ... y {len(all_errors) - 10} errores más")
+                    else:
+                        logger.error(f"❌ Error en actualización BATCH: {batch_result.get('error')}")
+                        failed_products = len(products_data_batch)
+                else:
+                    logger.warning("⚠️ No hay productos válidos para enviar a Odoo en BATCH")
             else:
                 # Procesamiento normal sin Odoo ( ThreadPoolExecutor para extracción de datos )
                 with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
