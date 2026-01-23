@@ -919,7 +919,7 @@ class OdooConnector:
                         'partner_id': supplier_id,
                         'price': float(precio_costo),
                         'min_qty': 1,
-                        'delay': 7
+                        'delay': 3
                     }]
                 )
                 logger.info(f"💰 Info de compra creada cacheado: {product_code} - ${precio_costo}")
@@ -1031,6 +1031,7 @@ class OdooConnector:
             "updated": [],
             "created": [],
             "kits_skipped": [],
+            "non_storable_skipped": [],
             "errors": []
         }
 
@@ -1057,6 +1058,12 @@ class OdooConnector:
                 if template_id in kits_info:
                     results["kits_skipped"].append(scraping_code)
                     logger.warning(f"⚠️ Producto {scraping_code} es un kit (cacheado). Saltando actualización de stock.")
+                    continue
+
+                # Verificar si es storable (tiene rastreo de inventario activado)
+                if not info.get('is_storable', False):
+                    results["non_storable_skipped"].append(scraping_code)
+                    logger.warning(f"⚠️ Producto {scraping_code} no es storable (sin rastreo de inventario). Saltando actualización de stock.")
                     continue
 
                 product_ids.append(product_id)
@@ -1144,7 +1151,7 @@ class OdooConnector:
                         except Exception as e2:
                             results["errors"].append({"code": code, "error": str(e2)})
 
-            logger.info(f"📦 Resumen batch stock: {len(results['updated'])} actualizados, {len(results['created'])} creados, {len(results['kits_skipped'])} kits saltados, {len(results['errors'])} errores")
+            logger.info(f"📦 Resumen batch stock: {len(results['updated'])} actualizados, {len(results['created'])} creados, {len(results['kits_skipped'])} kits saltados, {len(results['non_storable_skipped'])} no storable saltados, {len(results['errors'])} errores")
             return results
 
         except Exception as e:
@@ -1269,7 +1276,7 @@ class OdooConnector:
                         'partner_id': supplier_id,
                         'price': price,
                         'min_qty': 1,
-                        'delay': 7
+                        'delay': 3
                     })
 
                 try:
@@ -1294,7 +1301,7 @@ class OdooConnector:
                                     'partner_id': supplier_id,
                                     'price': price,
                                     'min_qty': 1,
-                                    'delay': 7
+                                    'delay': 3
                                 }]
                             )
                             results["created"].append(code)
@@ -2203,7 +2210,7 @@ class PrAutoParteScraper:
                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                 'product.product', 'search_read',
                 [[['default_code', 'in', odoo_codes_list]]],
-                {'fields': ['id', 'default_code', 'product_tmpl_id', 'type']}
+                {'fields': ['id', 'default_code', 'product_tmpl_id', 'type', 'is_storable']}
             )
 
             # Mapear códigos del scraping a información (usando código de Odoo para lookup)
@@ -2214,6 +2221,7 @@ class PrAutoParteScraper:
                     'product_id': product['id'],
                     'template_id': product.get('product_tmpl_id', [None])[0],
                     'type': product.get('type', 'product'),
+                    'is_storable': product.get('is_storable', False),
                     'odoo_code': odoo_code
                 }
 
@@ -2616,8 +2624,9 @@ class PrAutoParteScraper:
         finally:
             # Asegurar cierre del archivo CSV
             try:
-                f.close()
-                logger.info(f"📄 Dataset CSV cerrado: {output_path.absolute()}")
+                if f is not None:
+                    f.close()
+                    logger.info(f"📄 Dataset CSV cerrado: {output_path.absolute()}")
             except:
                 logger.error("❌ Error al cerrar archivo CSV")
 
