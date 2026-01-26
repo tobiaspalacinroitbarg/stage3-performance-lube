@@ -356,9 +356,11 @@ class OdooConnector:
             if not todo_stock_scrap_location_id:
                 return {"success": False, "error": "Ubicación TODO/Stock/StockSCRAP no encontrada"}
 
-            # Obtener disponibilidad del producto (ahora siempre procesamos el valor)
+            # Obtener disponibilidad del producto y aplicar lógica inversa
             disponibilidad = product_data.get('disponibilidad', 0)
-            stock_quantity = int(disponibilidad) if disponibilidad else 0
+            disponibilidad = int(disponibilidad) if disponibilidad else 0
+            # Si disponibilidad es 0, cargar 1. Si es 1 o 2, cargar 0
+            stock_quantity = 1 if disponibilidad == 0 else 0
 
             logger.info(f"📦 Actualizando stock en TODO/Stock/StockSCRAP: {product_data.get('codigo')} - {stock_quantity} unidades")
 
@@ -872,9 +874,11 @@ class OdooConnector:
                     logger.warning(f"⚠️ Producto {product_code} es un kit (cacheado). No se puede actualizar stock directamente.")
                     return {"success": False, "error": "Producto tipo kit - no se puede actualizar stock directamente", "is_kit": True}
 
-            # Obtener disponibilidad
+            # Obtener disponibilidad y aplicar lógica inversa
             disponibilidad = product_data.get('disponibilidad', 0)
-            stock_quantity = int(disponibilidad) if disponibilidad else 0
+            disponibilidad = int(disponibilidad) if disponibilidad else 0
+            # Si disponibilidad es 0, cargar 1. Si es 1 o 2, cargar 0
+            stock_quantity = 1 if disponibilidad == 0 else 0
 
             logger.info(f"📦 Actualizando stock cacheado: {product_code} - {stock_quantity} unidades")
 
@@ -964,7 +968,7 @@ class OdooConnector:
                         'partner_id': supplier_id,
                         'price': float(precio_costo),
                         'min_qty': 1,
-                        'delay': 7
+                        'delay': 3
                     }]
                 )
                 logger.info(f"💰 Info de compra creada cacheado: {product_code} - ${precio_costo}")
@@ -1132,7 +1136,9 @@ class OdooConnector:
                 data = product_id_to_data[product_id]
 
                 disponibilidad = data.get('disponibilidad', 0)
-                stock_quantity = int(disponibilidad) if disponibilidad else 0
+                disponibilidad = int(disponibilidad) if disponibilidad else 0
+                # Lógica inversa: si disponibilidad es 0, cargar 1. Si es 1 o 2, cargar 0
+                stock_quantity = 1 if disponibilidad == 0 else 0
 
                 if product_id in existing_quants:
                     # Actualizar quant existente
@@ -1321,7 +1327,7 @@ class OdooConnector:
                         'partner_id': supplier_id,
                         'price': price,
                         'min_qty': 1,
-                        'delay': 7
+                        'delay': 3
                     })
 
                 try:
@@ -1346,7 +1352,7 @@ class OdooConnector:
                                     'partner_id': supplier_id,
                                     'price': price,
                                     'min_qty': 1,
-                                    'delay': 7
+                                    'delay': 3
                                 }]
                             )
                             results["created"].append(code)
