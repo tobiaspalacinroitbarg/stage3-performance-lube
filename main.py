@@ -74,6 +74,7 @@ class ScrapingConfig:
     odoo_user: str = os.getenv("ODOO_USER", "admin")
     odoo_password: str = os.getenv("ODOO_PASSWORD", "admin")
     send_to_odoo: bool = os.getenv("SEND_TO_ODOO", "false").lower() == "true"
+    merged_supplier_filter: Optional[str] = os.getenv("MERGED_SUPPLIER_FILTER")  # Filtro por proveedor para CSV merged
 
     # Configuración de rendimiento
     page_timeout: int = int(os.getenv("PAGE_TIMEOUT", "15"))  
@@ -852,6 +853,76 @@ class OdooConnector:
         except Exception as e:
             logger.error(f"Error al crear/obtener proveedor: {e}")
             return None
+
+    def _get_supplier_id_by_name(self, supplier_name: str) -> Optional[int]:
+        """Obtener el ID de un proveedor por su nombre"""
+        try:
+            if not self.models:
+                logger.error("No conectado a Odoo")
+                return None
+
+            suppliers = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'res.partner', 'search_read',
+                [[['name', '=', supplier_name], ['supplier_rank', '>', 0]]],
+                {'fields': ['id', 'name']}
+            )
+
+            if suppliers:
+                logger.info(f"✅ Proveedor encontrado: {supplier_name} (ID: {suppliers[0]['id']})")
+                return suppliers[0]['id']
+
+            logger.warning(f"⚠️ Proveedor no encontrado: {supplier_name}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error al buscar proveedor por nombre: {e}")
+            return None
+
+    def _get_product_ids_by_supplier(self, supplier_name: str) -> set:
+        """Obtener los IDs de productos que tienen a un proveedor específico asociado"""
+        try:
+            if not self.models:
+                logger.error("No conectado a Odoo")
+                return set()
+
+            # Primero obtener el ID del proveedor
+            supplier_id = self._get_supplier_id_by_name(supplier_name)
+            if not supplier_id:
+                return set()
+
+            # Buscar todos los sellerinfo de este proveedor
+            sellerinfos = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'product.supplierinfo', 'search_read',
+                [[['partner_id', '=', supplier_id]]],
+                {'fields': ['product_tmpl_id', 'product_id']}
+            )
+
+            # Extraer product_ids (usar product_id si existe, sino usar product_tmpl_id)
+            product_ids = set()
+            for seller in sellerinfos:
+                if 'product_id' in seller and seller['product_id']:
+                    # product.product variant específica
+                    product_ids.add(seller['product_id'][0])
+                elif 'product_tmpl_id' in seller and seller['product_tmpl_id']:
+                    # Si solo tenemos template, necesitamos buscar las variantes
+                    template_id = seller['product_tmpl_id'][0]
+                    variants = self.models.execute_kw(
+                        self.db, self.uid, self.password,
+                        'product.product', 'search_read',
+                        [[['product_tmpl_id', '=', template_id]]],
+                        {'fields': ['id']}
+                    )
+                    for variant in variants:
+                        product_ids.add(variant['id'])
+
+            logger.info(f"📊 Se encontraron {len(product_ids)} productos para el proveedor '{supplier_name}'")
+            return product_ids
+
+        except Exception as e:
+            logger.error(f"Error al obtener productos por proveedor: {e}")
+            return set()
 
     # 🔥 MÉTODOS OPTIMIZADOS CACHEADOS
     def _update_scraping_stock_optimized(self, product_id: int, product_data: Dict, location_id: int, kits_info: set) -> Dict:
@@ -1633,10 +1704,8 @@ class PrAutoParteScraper:
                 df_articulos = df_scraped
                 logger.info("📊 Usando datos del scraping en memoria")
             else:
-                # Fallback: intentar cargar desde CSV (para modo --matched-only)
                 df_articulos = self._get_latest_scraping_results()
                 if df_articulos is None:
-                    logger.warning("⚠️ No se proporcionaron datos del scraping y no hay CSV guardado")
                     return set()
 
             if df_productos is None:
@@ -1722,8 +1791,6 @@ class PrAutoParteScraper:
                 logger.info(f"✅ Productos Odoo cargados: {len(df)} registros")
                 return df
             else:
-                logger.warning(f"⚠️ No se encuentra backup de productos Odoo: {productos_path.name}")
-                logger.info("💡 Se generará nuevo dataset al ejecutar el scraper completo")
                 return None
 
         except Exception as e:
@@ -1840,8 +1907,6 @@ class PrAutoParteScraper:
             articulos_files = list(Path(self.config.output_dir).glob("articulos_*.csv"))
 
             if not articulos_files:
-                logger.warning("⚠️ No se encuentran archivos de scraping CSV")
-                logger.info("💡 Se generarán coincidencias solo cuando tengas resultados de scraping")
                 return None
 
             # Usar el archivo más reciente
@@ -2687,7 +2752,7 @@ class PrAutoParteScraper:
             # 6. Opcional: Crear CSV merged para análisis
             if create_merged_csv:
                 logger.info("📄 Creando CSV merged con datos combinados...")
-                self._create_merged_csv(df_productos, scraping_result)
+                self._create_merged_csv(df_productos, scraping_result, self.config.merged_supplier_filter)
 
             # 7. Procesar coincidencias usando datos YA SCRAPEADOS (SIN nuevo scraping)
             self.process_matched_products_optimized(scraping_result)
@@ -2703,10 +2768,31 @@ class PrAutoParteScraper:
             logger.error(f"❌ Error en el proceso principal: {e}")
             raise
 
-    def _create_merged_csv(self, df_productos: pd.DataFrame, scraping_result: Dict) -> None:
-        """Crear CSV merged combinando datos de Odoo y scraping"""
+    def _create_merged_csv(self, df_productos: pd.DataFrame, scraping_result: Dict, supplier_filter: Optional[str] = None) -> None:
+        """Crear CSV merged combinando datos de Odoo y scraping
+
+        Args:
+            df_productos: DataFrame con productos de Odoo
+            scraping_result: Dict con resultados del scraping
+            supplier_filter: Nombre del proveedor de Odoo para filtrar productos (opcional)
+                            Ejemplo: "PR SH DE OLIVEIRA ROBERTO Y JUAN QUIROZ"
+        """
         try:
             logger.info("📄 Creando dataset merged para análisis...")
+
+            # Filtrar productos por proveedor si se especifica
+            if supplier_filter:
+                logger.info(f"🔍 Filtrando productos por proveedor: '{supplier_filter}'")
+                product_ids_by_supplier = self.odoo_connector._get_product_ids_by_supplier(supplier_filter)
+
+                if not product_ids_by_supplier:
+                    logger.warning(f"⚠️ No se encontraron productos para el proveedor '{supplier_filter}'. Se usarán todos los productos.")
+                else:
+                    # Filtrar df_productos para incluir solo productos con ese proveedor
+                    original_count = len(df_productos)
+                    df_productos = df_productos[df_productos['id'].isin(product_ids_by_supplier)]
+                    filtered_count = len(df_productos)
+                    logger.info(f"✅ Productos filtrados: {original_count} → {filtered_count}")
 
             # Convertir scraped items a DataFrame
             scraped_items = scraping_result.get("items", [])
@@ -2836,7 +2922,7 @@ def run_matched_only():
 
         # Opcional: Crear merged CSV
         if df_productos is not None and scraped_data.get("success"):
-            scraper._create_merged_csv(df_productos, scraped_data)
+            scraper._create_merged_csv(df_productos, scraped_data, scraper.config.merged_supplier_filter)
 
         # Procesar coincidencias
         scraper.process_matched_products_optimized(scraped_data)
