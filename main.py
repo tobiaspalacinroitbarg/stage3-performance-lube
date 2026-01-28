@@ -1669,8 +1669,8 @@ class PrAutoParteScraper:
 
         # Mapeo: código scraping → código Odoo (para usar código Odoo al actualizar)
         self.scraping_to_odoo_code: Dict[str, str] = {}
-        # Cargar códigos coincidentes del dataset de productos
-        self.matched_codes = self._load_matched_codes()
+        # Códigos coincidentes - se cargarán con el filtro correspondiente
+        self.matched_codes: set = set()
     
     def _setup_logging(self) -> None:
         """Configurar sistema de logging profesional (solo consola, sin archivo)"""
@@ -1689,15 +1689,33 @@ class PrAutoParteScraper:
         logger.info(f"🔧 Logging configurado - Nivel: {log_level} - Solo consola (sin archivo)")
 
   
-    def _load_matched_codes(self, df_scraped: pd.DataFrame = None) -> set:
-        """Cargar datasets existentes y calcular códigos coincidentes SIN descargar"""
+    def _load_matched_codes(self, df_scraped: pd.DataFrame = None, supplier_filter: Optional[str] = None) -> set:
+        """Cargar datasets existentes y calcular códigos coincidentes SIN descargar
+
+        Args:
+            df_scraped: DataFrame con datos del scraping (opcional)
+            supplier_filter: Nombre del proveedor para filtrar productos (opcional)
+        """
         try:
             logger.info("🔍 Analizando coincidencias...")
 
             # 1. Cargar dataset de productos Odoo desde CSV/Excel existente
             df_productos = self._load_odoo_products_from_backup()
 
-            # 2. Usar DataFrame del scraping proporcionado o cargar desde CSV
+            # 2. Filtrar productos por proveedor si se especifica
+            if supplier_filter and df_productos is not None:
+                logger.info(f"🔍 Filtrando productos por proveedor: '{supplier_filter}'")
+                product_ids_by_supplier = self.odoo_connector._get_product_ids_by_supplier(supplier_filter)
+
+                if product_ids_by_supplier:
+                    original_count = len(df_productos)
+                    df_productos = df_productos[df_productos['id'].isin(product_ids_by_supplier)]
+                    filtered_count = len(df_productos)
+                    logger.info(f"✅ Productos filtrados por proveedor: {original_count} → {filtered_count}")
+                else:
+                    logger.warning(f"⚠️ No se encontraron productos para el proveedor '{supplier_filter}'")
+
+            # 3. Usar DataFrame del scraping proporcionado o cargar desde CSV
             if df_scraped is not None:
                 df_articulos = df_scraped
                 logger.info("📊 Usando datos del scraping en memoria")
@@ -1749,6 +1767,10 @@ class PrAutoParteScraper:
 
             # Encontrar coincidencias exactas (códigos originales)
             matched_codes_exact = codigos_productos.intersection(codigos_articulos)
+
+            # Crear mapeo para coincidencias exactas ( scraping_code == odoo_code )
+            for code in matched_codes_exact:
+                self.scraping_to_odoo_code[code] = code
 
             # Encontrar coincidencias normalizadas (matching robusto)
             matched_codes_normalized = set()
@@ -2737,7 +2759,7 @@ class PrAutoParteScraper:
             # 4. Cargar coincidencias usando datos del scraping en memoria
             logger.info("🔍 Analizando coincidencias desde datos del scraping...")
             df_scraped = scraping_result.get("df_scraped")
-            self.matched_codes = self._load_matched_codes(df_scraped)
+            self.matched_codes = self._load_matched_codes(df_scraped, self.config.merged_supplier_filter)
 
             # 5. Verificar que hay productos coincidentes
             if not self.matched_codes:
@@ -2750,7 +2772,7 @@ class PrAutoParteScraper:
             # 6. Opcional: Crear CSV merged para análisis
             if create_merged_csv:
                 logger.info("📄 Creando CSV merged con datos combinados...")
-                self._create_merged_csv(df_productos, scraping_result, self.config.merged_supplier_filter)
+                self._create_merged_csv(df_productos, scraping_result, self.config.merged_supplier_filter, self.matched_codes)
 
             # 7. Procesar coincidencias usando datos YA SCRAPEADOS (SIN nuevo scraping)
             self.process_matched_products_optimized(scraping_result)
@@ -2766,7 +2788,7 @@ class PrAutoParteScraper:
             logger.error(f"❌ Error en el proceso principal: {e}")
             raise
 
-    def _create_merged_csv(self, df_productos: pd.DataFrame, scraping_result: Dict, supplier_filter: Optional[str] = None) -> None:
+    def _create_merged_csv(self, df_productos: pd.DataFrame, scraping_result: Dict, supplier_filter: Optional[str] = None, matched_codes: set = None) -> None:
         """Crear CSV merged combinando datos de Odoo y scraping
 
         Args:
@@ -2774,6 +2796,7 @@ class PrAutoParteScraper:
             scraping_result: Dict con resultados del scraping
             supplier_filter: Nombre del proveedor de Odoo para filtrar productos (opcional)
                             Ejemplo: "PR SH DE OLIVEIRA ROBERTO Y JUAN QUIROZ"
+            matched_codes: Set de códigos coincidentes (opcional, usa self.matched_codes si no se proporciona)
         """
         try:
             logger.info("📄 Creando dataset merged para análisis...")
@@ -2805,6 +2828,13 @@ class PrAutoParteScraper:
 
             df_scraped = pd.DataFrame(scraped_data)
 
+            # Usar los códigos coincidentes proporcionados o los de self.matched_codes
+            codes_to_use = matched_codes if matched_codes is not None else self.matched_codes
+
+            if not codes_to_use:
+                logger.warning("⚠️ No hay códigos coincidentes para crear merged CSV")
+                return
+
             # Preparar DataFrames para merge
             # Productos Odoo: usar 'default_code' o 'Referencia interna' como clave
             odoo_key_col = 'default_code' if 'default_code' in df_productos.columns else 'Referencia interna'
@@ -2819,10 +2849,24 @@ class PrAutoParteScraper:
             df_productos_merge = df_productos_merge.rename(columns={odoo_key_col: 'codigo_merged'})
             df_scraped_merge = df_scraped_merge.rename(columns={scraped_key_col: 'codigo_merged'})
 
-            # Merge por código normalizado
+            # 🎯 FILTRAR POR CÓDIGOS COINCIDENTES (consistencia con actualización)
+            # Usar el mapeo scraping_to_odoo_code para obtener los códigos de Odoo
+            odoo_codes_to_match = set()
+            for scraping_code in codes_to_use:
+                if scraping_code in self.scraping_to_odoo_code:
+                    odoo_codes_to_match.add(self.scraping_to_odoo_code[scraping_code])
+                else:
+                    # Si no hay mapeo, usar el código tal cual (coincidencia exacta)
+                    odoo_codes_to_match.add(scraping_code)
+
+            # Filtrar ambos DataFrames por los códigos coincidentes
+            df_productos_filtered = df_productos_merge[df_productos_merge['codigo_merged'].isin(odoo_codes_to_match)]
+            df_scraped_filtered = df_scraped_merge[df_scraped_merge['codigo_merged'].isin(codes_to_use)]
+
+            # Merge por código exacto (ya filtrados por matched_codes)
             merged_df = pd.merge(
-                df_productos_merge,
-                df_scraped_merge,
+                df_productos_filtered,
+                df_scraped_filtered,
                 on='codigo_merged',
                 how='inner',
                 suffixes=('_odoo', '_scraped')
@@ -2898,7 +2942,7 @@ def run_matched_only():
 
         # Cargar coincidencias desde datasets existentes
         logger.info("🔍 Cargando coincidencias desde datasets existentes...")
-        scraper.matched_codes = scraper._load_matched_codes()
+        scraper.matched_codes = scraper._load_matched_codes(supplier_filter=scraper.config.merged_supplier_filter)
 
         # Cargar dataset de productos para merged CSV
         df_productos = scraper._load_odoo_products_from_backup()
@@ -2920,7 +2964,7 @@ def run_matched_only():
 
         # Opcional: Crear merged CSV
         if df_productos is not None and scraped_data.get("success"):
-            scraper._create_merged_csv(df_productos, scraped_data, scraper.config.merged_supplier_filter)
+            scraper._create_merged_csv(df_productos, scraped_data, scraper.config.merged_supplier_filter, scraper.matched_codes)
 
         # Procesar coincidencias
         scraper.process_matched_products_optimized(scraped_data)
