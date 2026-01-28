@@ -1,6 +1,5 @@
 import os
 import json
-import csv
 import time
 import requests
 import xmlrpc.client
@@ -1605,25 +1604,12 @@ class PrAutoParteScraper:
         self.matched_codes = self._load_matched_codes()
     
     def _setup_logging(self) -> None:
-        """Configurar sistema de logging profesional"""
-        log_dir = Path(self.config.logs_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-
+        """Configurar sistema de logging profesional (solo consola, sin archivo)"""
         # Configurar nivel de log desde variable de entorno
         log_level = self.config.log_level.upper()
 
-        # Log a archivo con rotación
-        logger.add(
-            self.config.get_log_path(),
-            rotation="1 day",
-            retention=f"{self.config.log_retention_days} days",
-            level=log_level,
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {module}:{function}:{line} | {message}",
-            encoding="utf-8",
-            compression="zip"  # Comprimir logs antiguos
-        )
-
-        # Log a consola para PM2 (en producción)
+        # Log a consola para PM2 (en producción) - SIN archivo
+        logger.remove()  # Remover handler por defecto
         logger.add(
             lambda msg: print(msg, end="", flush=True),
             level=log_level,
@@ -1631,24 +1617,30 @@ class PrAutoParteScraper:
             colorize=True
         )
 
-        logger.info(f"🔧 Logging configurado - Nivel: {log_level} - Directorio: {log_dir}")
-        logger.info(f"📄 Log file: {self.config.get_log_path()}")
+        logger.info(f"🔧 Logging configurado - Nivel: {log_level} - Solo consola (sin archivo)")
 
   
-    def _load_matched_codes(self) -> set:
+    def _load_matched_codes(self, df_scraped: pd.DataFrame = None) -> set:
         """Cargar datasets existentes y calcular códigos coincidentes SIN descargar"""
         try:
-            logger.info("🔍 Analizando coincidencias desde datasets existentes...")
+            logger.info("🔍 Analizando coincidencias...")
 
             # 1. Cargar dataset de productos Odoo desde CSV/Excel existente
             df_productos = self._load_odoo_products_from_backup()
 
-            # 2. Cargar dataset de artículos desde CSV más reciente
-            df_articulos = self._get_latest_scraping_results()
+            # 2. Usar DataFrame del scraping proporcionado o cargar desde CSV
+            if df_scraped is not None:
+                df_articulos = df_scraped
+                logger.info("📊 Usando datos del scraping en memoria")
+            else:
+                # Fallback: intentar cargar desde CSV (para modo --matched-only)
+                df_articulos = self._get_latest_scraping_results()
+                if df_articulos is None:
+                    logger.warning("⚠️ No se proporcionaron datos del scraping y no hay CSV guardado")
+                    return set()
 
-            if df_productos is None or df_articulos is None:
-                logger.error("❌ No se pudieron cargar los datasets necesarios")
-                logger.info("💡 Ejecuta el scraper completo primero para generar los datasets")
+            if df_productos is None:
+                logger.error("❌ No se pudo cargar el dataset de productos Odoo")
                 return set()
 
             logger.info(f"📊 Dataset Productos (Odoo): {len(df_productos)} registros")
@@ -2530,8 +2522,8 @@ class PrAutoParteScraper:
             raise
 
     def scrape_products_and_collect_data(self, num_pages: int, bearer_token: str) -> Dict:
-        """Realizar scraping completo de productos y retornar datos para procesamiento de coincidencias"""
-        logger.info(f"📡 Iniciando scraping completo de {num_pages} páginas para generar dataset...")
+        """Realizar scraping completo de productos y retornar datos para procesamiento de coincidencias (SIN guardar CSV)"""
+        logger.info(f"📡 Iniciando scraping completo de {num_pages} páginas...")
 
         # Configuración inicial
         headers = self._get_request_headers(bearer_token)
@@ -2542,34 +2534,14 @@ class PrAutoParteScraper:
 
         # Recolector de datos para coincidencias
         all_scraped_items = []
-
-        # Preparar CSV (siempre se crea)
-        fields = [
-            "id", "codigo", "marca", "descripcion", "precioLista", "precioCosto",
-            "precioVenta", "descuentos", "disponibilidad", "origen", "fotos"
-        ]
-        output_path = self.config.get_output_path()
+        all_extracted_data = []  # Para crear DataFrame en memoria
 
         try:
-            # Verificar y manejar archivo existente
-            if output_path.exists():
-                backup_path = output_path.with_suffix('.backup.csv')
-                import shutil
-                shutil.copy2(output_path, backup_path)
-                logger.info(f"📄 Archivo existente respaldado como: {backup_path.name}")
-
-            # Abrir archivo CSV
-            f = open(output_path, "w", newline="", encoding="utf-8")
-            writer = csv.DictWriter(f, fieldnames=fields)
-            writer.writeheader()
-
-            logger.info(f"📄 Dataset guardando en: {output_path.absolute()}")
-
             logger.info(f"⚙️  Configuración scraping completo:")
             logger.info(f"   📄 Páginas totales: {num_pages-1}")
             logger.info(f"   ⏱️  Retraso entre peticiones: {self.config.request_delay}s")
             logger.info(f"   ⌛ Timeout de página: {self.config.page_timeout}s")
-            logger.info(f"   🎯 Objetivo: Generar dataset + recolectar datos para coincidencias")
+            logger.info(f"   💾 Datos en memoria (sin guardar CSV)")
 
             # Procesamiento de páginas
             for page in range(1, num_pages):
@@ -2595,7 +2567,7 @@ class PrAutoParteScraper:
                         logger.warning(f"⚠️ Página {page} no contiene items")
                         continue
 
-                    # Procesar items de la página (guardar en CSV y recolectar)
+                    # Procesar items de la página (recolectar en memoria)
                     page_items_processed = 0
                     for item in items:
                         try:
@@ -2606,12 +2578,12 @@ class PrAutoParteScraper:
                                 logger.warning(f"⚠️ Item sin código omitido: {extracted_data.get('id', 'N/A')}")
                                 continue
 
-                            # Escribir en CSV
-                            writer.writerow(extracted_data)
+                            # Recolectar datos extraídos en memoria
+                            all_extracted_data.append(extracted_data)
                             total_items += 1
                             page_items_processed += 1
 
-                            # Recolectar para procesamiento de coincidencias
+                            # Recolectar item original para procesamiento de coincidencias
                             all_scraped_items.append(item)
 
                         except Exception as e:
@@ -2649,37 +2621,30 @@ class PrAutoParteScraper:
             duration = end_time - start_time
             success_rate = (successful_pages / (num_pages - 1)) * 100 if num_pages > 1 else 0
 
-            logger.info("🎉 Scraping completo para dataset finalizado!")
+            logger.info("🎉 Scraping completo finalizado!")
             logger.info(f"   📊 Items procesados: {total_items}")
             logger.info(f"   📄 Páginas exitosas: {successful_pages}/{num_pages-1} ({success_rate:.1f}%)")
             logger.info(f"   ❌ Páginas fallidas: {failed_pages}")
             logger.info(f"   ⏱️  Tiempo total: {duration}")
             logger.info(f"   📈 Velocidad: {total_items/duration.total_seconds():.2f} items/segundo")
-            logger.info(f"   📄 Dataset CSV: {output_path.name}")
-            logger.info(f"   📁 Ubicación: {output_path.absolute()}")
-            logger.info(f"   🔍 Listo para análisis de coincidencias")
+            logger.info(f"   💾 Datos en memoria (CSV no guardado)")
             logger.info(f"   📦 Items recolectados: {len(all_scraped_items)}")
+
+            # Crear DataFrame en memoria para usar en _load_matched_codes
+            df_scraped = pd.DataFrame(all_extracted_data)
 
             # Retornar datos recolectados para procesamiento de coincidencias
             return {
                 "success": True,
                 "items": all_scraped_items,
                 "total_items": total_items,
-                "csv_path": output_path,
+                "df_scraped": df_scraped,  # DataFrame en memoria
                 "processing_time": duration
             }
 
         except Exception as e:
             logger.error(f"❌ Error crítico durante el proceso: {e}")
             return {"success": False, "error": str(e)}
-        finally:
-            # Asegurar cierre del archivo CSV
-            try:
-                if f is not None:
-                    f.close()
-                    logger.info(f"📄 Dataset CSV cerrado: {output_path.absolute()}")
-            except:
-                logger.error("❌ Error al cerrar archivo CSV")
 
     def run(self, create_merged_csv: bool = True) -> None:
         """Ejecutar el proceso completo de scraping optimizado"""
@@ -2706,14 +2671,15 @@ class PrAutoParteScraper:
                 logger.error(f"❌ El scraping falló: {scraping_result.get('error')}")
                 return
 
-            # 4. Cargar coincidencias desde datasets generados (SIN descargas)
-            logger.info("🔍 Analizando coincidencias desde datasets existentes...")
-            self.matched_codes = self._load_matched_codes()
+            # 4. Cargar coincidencias usando datos del scraping en memoria
+            logger.info("🔍 Analizando coincidencias desde datos del scraping...")
+            df_scraped = scraping_result.get("df_scraped")
+            self.matched_codes = self._load_matched_codes(df_scraped)
 
             # 5. Verificar que hay productos coincidentes
             if not self.matched_codes:
                 logger.warning("⚠️ No se encontraron productos coincidentes. No hay nada que procesar.")
-                logger.info("💡 El scraping se completó y se guardó en CSV, pero no hubo coincidencias con Odoo")
+                logger.info("💡 El scraping se completó en memoria, pero no hubo coincidencias con Odoo")
                 return
 
             logger.info(f"🎯 Se procesarán {len(self.matched_codes)} productos coincidentes")
@@ -2729,7 +2695,7 @@ class PrAutoParteScraper:
             logger.info("✅ Proceso optimizado completado exitosamente")
             logger.info("📁 Archivos generados:")
             logger.info(f"   📊 Productos Odoo: Producto (product.template).xlsx")
-            logger.info(f"   📄 Artículos scraping: {scraping_result.get('csv_path').name if scraping_result.get('csv_path') else 'N/A'}")
+            logger.info(f"   💾 Datos scraping en memoria (CSV no guardado)")
             if create_merged_csv:
                 logger.info(f"   🔗 Dataset merged: productos_merged.csv")
 
