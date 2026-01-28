@@ -267,11 +267,11 @@ class OdooConnector:
             # 1. Cargar stock en ubicación TODO/Stock/StockSCRAP (siempre, incluso si es 0)
             scraping_stock_result = self._update_scraping_stock(existing_product_id, product_data)
 
-            # 2. Actualizar información de compra
-            purchase_info_result = self._update_purchase_info(existing_product_id, product_data)
+            # 2. Actualizar información de compra - COMENTADO
+            # purchase_info_result = self._update_purchase_info(existing_product_id, product_data)
 
-            # 3. Establecer regla de reposición en '-35'
-            replenishment_result = self._update_replenishment_rule(existing_product_id)
+            # 3. Establecer regla de reposición en '-35' - COMENTADO
+            # replenishment_result = self._update_replenishment_rule(existing_product_id)
 
             return {
                 "success": True,
@@ -279,8 +279,8 @@ class OdooConnector:
                 "product_id": existing_product_id,
                 "product_code": product_code,
                 "stock_updated": scraping_stock_result,
-                "purchase_updated": purchase_info_result,
-                "replenishment_updated": replenishment_result
+                "purchase_updated": {"success": True, "skipped": True, "note": "Actualización de proveedor deshabilitada"},
+                "replenishment_updated": {"success": True, "skipped": True, "note": "Reglas de reposición deshabilitadas"}
             }
 
         except Exception as e:
@@ -317,21 +317,21 @@ class OdooConnector:
                 cached_data['kits_info']
             )
 
-            # 2. Actualizar información de compra usando supplier_id cacheado
-            purchase_info_result = self._update_purchase_info_optimized(
-                existing_product_id,
-                product_data,
-                cached_data['supplier_id']
-            )
+            # 2. Actualizar información de compra usando supplier_id cacheado - COMENTADO
+            # purchase_info_result = self._update_purchase_info_optimized(
+            #     existing_product_id,
+            #     product_data,
+            #     cached_data['supplier_id']
+            # )
 
-            # 3. Establecer regla de reposición usando reglas cacheadas
-            replenishment_result = self._update_replenishment_rule_optimized(
-                existing_product_id,
-                template_id,
-                product_code,
-                cached_data['scraping_location_id'],
-                cached_data['existing_rules']
-            )
+            # 3. Establecer regla de reposición usando reglas cacheadas - COMENTADO
+            # replenishment_result = self._update_replenishment_rule_optimized(
+            #     existing_product_id,
+            #     template_id,
+            #     product_code,
+            #     cached_data['scraping_location_id'],
+            #     cached_data['existing_rules']
+            # )
 
             return {
                 "success": True,
@@ -339,8 +339,8 @@ class OdooConnector:
                 "product_id": existing_product_id,
                 "product_code": product_code,
                 "stock_updated": scraping_stock_result,
-                "purchase_updated": purchase_info_result,
-                "replenishment_updated": replenishment_result,
+                "purchase_updated": {"success": True, "skipped": True, "note": "Actualización de proveedor deshabilitada"},
+                "replenishment_updated": {"success": True, "skipped": True, "note": "Reglas de reposición deshabilitadas"},
                 "optimization_used": True
             }
 
@@ -1598,46 +1598,44 @@ class OdooConnector:
             stock_results = self._batch_update_stock_quants(products_data, cached_data)
             overall_results["stock"] = stock_results
 
-            # 2. Batch update de supplierinfo
-            logger.info("🛒 Fase 2/3: Actualizando info de compra en batch...")
-            supplier_results = self._batch_update_supplierinfo(products_data, cached_data)
-            overall_results["supplierinfo"] = supplier_results
+            # 2. Batch update de supplierinfo - COMENTADO
+            # logger.info("🛒 Fase 2/3: Actualizando info de compra en batch...")
+            # supplier_results = self._batch_update_supplierinfo(products_data, cached_data)
+            # overall_results["supplierinfo"] = supplier_results
 
-            # 3. Batch update de reglas de reposición
-            logger.info("📋 Fase 3/3: Actualizando reglas de reposición en batch...")
-            replenishment_results = self._batch_update_replenishment_rules(products_data, cached_data)
-            overall_results["replenishment"] = replenishment_results
+            # 3. Batch update de reglas de reposición - COMENTADO
+            # logger.info("📋 Fase 3/3: Actualizando reglas de reposición en batch...")
+            # replenishment_results = self._batch_update_replenishment_rules(products_data, cached_data)
+            # overall_results["replenishment"] = replenishment_results
 
             # Calcular estadísticas finales
             duration = datetime.now() - start_time
 
             successful_products = len(set(
-                stock_results.get("updated", []) + stock_results.get("created", []) +
-                supplier_results.get("updated", []) + supplier_results.get("created", []) +
-                replenishment_results.get("updated", []) + replenishment_results.get("created", [])
+                stock_results.get("updated", []) + stock_results.get("created", [])  # +
+                # supplier_results.get("updated", []) + supplier_results.get("created", []) +
+                # replenishment_results.get("updated", []) + replenishment_results.get("created", [])
             ))
 
             total_errors = (
-                len(stock_results.get("errors", [])) +
-                len(supplier_results.get("errors", [])) +
-                len(replenishment_results.get("errors", []))
+                len(stock_results.get("errors", []))  # +
+                # len(supplier_results.get("errors", [])) +
+                # len(replenishment_results.get("errors", []))
             )
 
             logger.info("✅ Actualización BATCH completada!")
             logger.info(f"   📊 Productos procesados: {len(products_data)}")
             logger.info(f"   📦 Stock: {len(stock_results.get('updated', []))} actualizados, {len(stock_results.get('created', []))} creados, {len(stock_results.get('kits_skipped', []))} kits saltados")
-            logger.info(f"   🛒 Supplierinfo: {len(supplier_results.get('updated', []))} actualizados, {len(supplier_results.get('created', []))} creados")
-            logger.info(f"   📋 Replenishment: {len(replenishment_results.get('updated', []))} actualizados, {len(replenishment_results.get('created', []))} creados")
+            # logger.info(f"   🛒 Supplierinfo: {len(supplier_results.get('updated', []))} actualizados, {len(supplier_results.get('created', []))} creados")  # COMENTADO
+            # logger.info(f"   📋 Replenishment: {len(replenishment_results.get('updated', []))} actualizados, {len(replenishment_results.get('created', []))} creados")  # COMENTADO
             logger.info(f"   ⏱️  Tiempo total: {duration}")
             logger.info(f"   🚀 Velocidad: {len(products_data)/duration.total_seconds():.2f} productos/segundo")
             logger.info(f"   🔥 AHORRO: ~{len(products_data) * 6} llamadas XML-RPC individuales evitadas")
 
             if total_errors > 0:
-                overall_results["errors"] = (
-                    stock_results.get("errors", []) +
-                    supplier_results.get("errors", []) +
-                    replenishment_results.get("errors", [])
-                )
+                overall_results["errors"] = stock_results.get("errors", [])  # +
+                # supplier_results.get("errors", []) +
+                # replenishment_results.get("errors", [])
                 logger.warning(f"   ⚠️ Errores totales: {total_errors}")
 
             return overall_results
@@ -2470,11 +2468,11 @@ class PrAutoParteScraper:
                     logger.error("❌ No se encontró ubicación TODO/Stock/StockSCRAP. Abortando proceso.")
                     return
 
-                # 2. Cachear proveedor PR Autopartes (Scraping)
-                cached_data['supplier_id'] = self.odoo_connector._get_or_create_supplier()
-                if not cached_data['supplier_id']:
-                    logger.error("❌ No se encontró/creó proveedor PR Autopartes. Abortando proceso.")
-                    return
+                # 2. Cachear proveedor PR Autopartes (Scraping) - COMENTADO
+                # cached_data['supplier_id'] = self.odoo_connector._get_or_create_supplier()
+                # if not cached_data['supplier_id']:
+                #     logger.error("❌ No se encontró/creó proveedor PR Autopartes. Abortando proceso.")
+                #     return
 
                 # 3. Pre-cargar información de productos para búsquedas batch
                 product_info = self._preload_product_information(matched_codes_list)
@@ -2484,12 +2482,12 @@ class PrAutoParteScraper:
                 kits_info = self._preload_kits_information(product_info)
                 cached_data['kits_info'] = kits_info
 
-                # 5. Pre-cargar reglas de reposición existentes
-                existing_rules = self._preload_replenishment_rules(product_info)
-                cached_data['existing_rules'] = existing_rules
+                # 5. Pre-cargar reglas de reposición existentes - COMENTADO
+                # existing_rules = self._preload_replenishment_rules(product_info)
+                # cached_data['existing_rules'] = existing_rules
 
                 cache_time = datetime.now() - cache_start
-                estimated_savings = len(matched_codes_list) * 4
+                estimated_savings = len(matched_codes_list) * 2  # Ajustado sin supplier/replenishment
                 logger.info(f"✅ Datos precargados en {cache_time} - Ahorrando ~{estimated_savings} consultas individuales")
 
             # 🔥 OPTIMIZACIÓN: Procesamiento BATCH con datos cacheados
@@ -2518,13 +2516,13 @@ class PrAutoParteScraper:
 
                         # Log detallado de resultados
                         stock_results = batch_result.get("stock", {})
-                        supplier_results = batch_result.get("supplierinfo", {})
-                        replenishment_results = batch_result.get("replenishment", {})
+                        # supplier_results = batch_result.get("supplierinfo", {})  # COMENTADO
+                        # replenishment_results = batch_result.get("replenishment", {})  # COMENTADO
 
                         logger.info("📊 Resumen de actualización BATCH:")
                         logger.info(f"   📦 Stock: {len(stock_results.get('updated', []))} actualizados, {len(stock_results.get('created', []))} creados")
-                        logger.info(f"   🛒 Supplierinfo: {len(supplier_results.get('updated', []))} actualizados, {len(supplier_results.get('created', []))} creados")
-                        logger.info(f"   📋 Replenishment: {len(replenishment_results.get('updated', []))} actualizados, {len(replenishment_results.get('created', []))} creados")
+                        # logger.info(f"   🛒 Supplierinfo: {len(supplier_results.get('updated', []))} actualizados, {len(supplier_results.get('created', []))} creados")  # COMENTADO
+                        # logger.info(f"   📋 Replenishment: {len(replenishment_results.get('updated', []))} actualizados, {len(replenishment_results.get('created', []))} creados")  # COMENTADO
 
                         # Mostrar errores si hubo
                         all_errors = batch_result.get("errors", [])
