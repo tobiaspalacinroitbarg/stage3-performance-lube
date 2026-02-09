@@ -880,7 +880,7 @@ class OdooConnector:
             return None
 
     def _get_product_ids_by_supplier(self, supplier_name: str) -> set:
-        """Obtener los IDs de productos que tienen a un proveedor específico asociado"""
+        """Obtener los IDs de productos que tienen a un proveedor específico como PRIMER proveedor (principal)"""
         try:
             if not self.models:
                 logger.error("No conectado a Odoo")
@@ -891,33 +891,90 @@ class OdooConnector:
             if not supplier_id:
                 return set()
 
-            # Buscar todos los sellerinfo de este proveedor
-            sellerinfos = self.models.execute_kw(
+            # ESTRATEGIA OPTIMIZADA (2 consultas eficientes):
+            # 1. Obtener los templates que tienen a este proveedor
+            # 2. Obtener TODOS los sellerinfo de SOLO esos templates
+            #    para poder determinar cuál es el proveedor principal de cada uno
+
+            # Paso 1: Buscar templates que tienen a este proveedor asociado
+            supplier_sellerinfos = self.models.execute_kw(
                 self.db, self.uid, self.password,
                 'product.supplierinfo', 'search_read',
                 [[['partner_id', '=', supplier_id]]],
-                {'fields': ['product_tmpl_id', 'product_id']}
+                {'fields': ['product_tmpl_id', 'product_id', 'sequence']}
             )
 
-            # Extraer product_ids (usar product_id si existe, sino usar product_tmpl_id)
+            if not supplier_sellerinfos:
+                return set()
+
+            # Extraer los template_ids únicos
+            template_ids = list(set(
+                s['product_tmpl_id'][0] for s in supplier_sellerinfos
+                if s.get('product_tmpl_id')
+            ))
+
+            logger.info(f"🔍 {len(template_ids)} templates tienen al proveedor '{supplier_name}'")
+
+            # Paso 2: Obtener TODOS los sellerinfo de SOLO esos templates
+            # Esto nos permite comparar y ver quién es el proveedor principal
+            all_sellers_of_templates = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'product.supplierinfo', 'search_read',
+                [[['product_tmpl_id', 'in', template_ids]]],
+                {'fields': ['product_tmpl_id', 'partner_id', 'sequence'], 'order': 'sequence ASC'}
+            )
+
+            # Procesar en memoria: para cada template, encontrar el proveedor principal
+            template_main_supplier = {}
+            for seller in all_sellers_of_templates:
+                tmpl = seller.get('product_tmpl_id')
+                if not tmpl:
+                    continue
+                template_id = tmpl[0]
+
+                # La primera vez que vemos un template (están ordenados por sequence),
+                # ese proveedor es el principal
+                if template_id not in template_main_supplier:
+                    template_main_supplier[template_id] = seller['partner_id'][0]
+
+            # Filtrar: solo templates donde este proveedor es el PRINCIPAL
+            templates_where_is_main = {
+                tid for tid, main_supp in template_main_supplier.items()
+                if main_supp == supplier_id
+            }
+
+            logger.info(f"🔍 De {len(template_ids)} templates del proveedor, {len(templates_where_is_main)} lo tienen como PRINCIPAL")
+
+            # Paso 3: Recolectar product_ids y templates que necesitan buscar variantes
             product_ids = set()
-            for seller in sellerinfos:
+            templates_needing_variants = []
+
+            for seller in supplier_sellerinfos:
+                template_id = seller.get('product_tmpl_id', [None])[0] if seller.get('product_tmpl_id') else None
+
+                # Solo procesar si el template tiene este proveedor como principal
+                if template_id not in templates_where_is_main:
+                    continue
+
                 if 'product_id' in seller and seller['product_id']:
                     # product.product variant específica
                     product_ids.add(seller['product_id'][0])
-                elif 'product_tmpl_id' in seller and seller['product_tmpl_id']:
-                    # Si solo tenemos template, necesitamos buscar las variantes
-                    template_id = seller['product_tmpl_id'][0]
-                    variants = self.models.execute_kw(
-                        self.db, self.uid, self.password,
-                        'product.product', 'search_read',
-                        [[['product_tmpl_id', '=', template_id]]],
-                        {'fields': ['id']}
-                    )
-                    for variant in variants:
-                        product_ids.add(variant['id'])
+                elif template_id:
+                    # Recopilar template para búsqueda masiva de variantes
+                    templates_needing_variants.append(template_id)
 
-            logger.info(f"📊 Se encontraron {len(product_ids)} productos para el proveedor '{supplier_name}'")
+            # Paso 4: BÚSQUEDA MASIVA de variantes (1 sola consulta en lugar de N)
+            if templates_needing_variants:
+                all_variants = self.models.execute_kw(
+                    self.db, self.uid, self.password,
+                    'product.product', 'search_read',
+                    [[['product_tmpl_id', 'in', templates_needing_variants]]],
+                    {'fields': ['id', 'product_tmpl_id']}
+                )
+                for variant in all_variants:
+                    product_ids.add(variant['id'])
+
+            logger.info(f"📊 Se encontraron {len(product_ids)} productos con '{supplier_name}' como proveedor PRINCIPAL")
             return product_ids
 
         except Exception as e:
