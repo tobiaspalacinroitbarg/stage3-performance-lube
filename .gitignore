@@ -2,6 +2,9 @@
 # PrAutoParte Scraper - .gitignore Profesional
 # =================================================================================
 
+# ===== NODE MODULES =====
+node_modules/
+
 # ===== PYTHON =====
 __pycache__/
 *.py[cod]
