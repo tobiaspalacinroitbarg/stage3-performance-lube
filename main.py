@@ -2287,9 +2287,20 @@ class PrAutoParteScraper:
             time.sleep(3)
             
             # Ir al catálogo
+            logger.info(f"Navegando al catálogo: {self.config.catalog_url}")
             self.driver.get(self.config.catalog_url)
-            time.sleep(3)
+            time.sleep(5)  # Más tiempo para cargar
             self._scroll_to_bottom()
+            
+            # Debug: guardar screenshot y HTML
+            try:
+                self.driver.save_screenshot("/app/output/debug_catalog.png")
+                logger.info("Screenshot guardado en /app/output/debug_catalog.png")
+                with open("/app/output/debug_catalog.html", "w") as f:
+                    f.write(self.driver.page_source)
+                logger.info("HTML guardado en /app/output/debug_catalog.html")
+            except Exception as e:
+                logger.warning(f"No se pudo guardar debug: {e}")
             
             # Obtener número de páginas
             last_page_button = self._wait_and_find_element(
