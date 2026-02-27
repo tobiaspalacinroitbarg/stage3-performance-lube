@@ -119,3 +119,36 @@ services:
       - TZ=America/Argentina/Buenos_Aires
     command: python sv_scraper_v2.py --dry-run
     profiles: ["test"]
+
+  # ===========================================================================
+  # REPLENISHMENT RULES - Crear reglas de reabastecimiento (producción)
+  # ===========================================================================
+  # Uso:
+  #   docker-compose run --rm replenishment-dry      # Preview
+  #   docker-compose run --rm replenishment          # Ejecutar
+  
+  replenishment:
+    build: .
+    container_name: replenishment
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+    command: python scripts/create_replenishment_rules.py
+    profiles: ["manual"]
+
+  replenishment-dry:
+    build: .
+    container_name: replenishment-dry
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+    command: python scripts/create_replenishment_rules.py --dry-run
+    profiles: ["manual"]

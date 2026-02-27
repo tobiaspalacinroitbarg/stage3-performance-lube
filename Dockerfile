@@ -32,6 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY sv_scraper_v2.py .
 COPY csv_manager.py .
+COPY scripts/ ./scripts/
 
 # Crear directorios necesarios
 RUN mkdir -p logs output

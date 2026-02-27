@@ -53,14 +53,15 @@ def connect_odoo():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(os.path.join(project_root, '.env'))
 
-    url = os.getenv('ODOO_URL')
-    db = os.getenv('ODOO_DB')
+    # URL hardcodeada a producción, credenciales desde .env
+    url = "https://pldistribucion.adhoc.ar"
+    db = "odoo"
     username = os.getenv('ODOO_USER')
     password = os.getenv('ODOO_PASSWORD')
 
-    if not all([url, db, username, password]):
+    if not all([username, password]):
         print("Error: Faltan variables de entorno en .env")
-        print("  Requeridas: ODOO_URL, ODOO_DB, ODOO_USER, ODOO_PASSWORD")
+        print("  Requeridas: ODOO_USER, ODOO_PASSWORD")
         sys.exit(1)
 
     print(f"Conectando a: {url}")
