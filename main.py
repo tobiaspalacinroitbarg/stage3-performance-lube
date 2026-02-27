@@ -814,6 +814,68 @@ class OdooConnector:
             logger.error(f"❌ Error al buscar ubicación TODO/Stock/StockSCRAP: {e}")
             return None
 
+    def _get_scraping_location_by_name(self, location_name: str) -> Optional[int]:
+        """Obtener ID de una ubicación de scraping dentro de TODO/Stock por nombre exacto
+        
+        Args:
+            location_name: Nombre exacto de la ubicación (ej: 'SV - Scraping')
+        
+        Returns:
+            ID de la ubicación o None si no existe
+        """
+        try:
+            if not self.models:
+                return None
+
+            # Buscar almacén TODO
+            warehouses = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.warehouse', 'search_read',
+                [[['name', '=', 'TODO']]],
+                {'fields': ['id', 'name', 'lot_stock_id']}
+            )
+
+            if not warehouses:
+                logger.error("❌ Almacén 'TODO' no encontrado")
+                return None
+
+            warehouse = warehouses[0]
+
+            # Buscar ubicación 'Stock' dentro de TODO
+            stock_locations = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.location', 'search_read',
+                [[['name', '=', 'Stock'], ['usage', '=', 'internal']]],
+                {'fields': ['id', 'name', 'complete_name']}
+            )
+
+            if not stock_locations:
+                logger.error("❌ Ubicación 'Stock' no encontrada")
+                return None
+
+            stock_location = stock_locations[0]
+
+            # Buscar la ubicación específica dentro de Stock
+            target_locations = self.models.execute_kw(
+                self.db, self.uid, self.password,
+                'stock.location', 'search_read',
+                [[['name', '=', location_name], ['usage', '=', 'internal'],
+                  ['location_id', '=', stock_location['id']]]],
+                {'fields': ['id', 'name', 'complete_name', 'location_id']}
+            )
+
+            if target_locations:
+                location = target_locations[0]
+                logger.info(f"✅ Ubicación encontrada: {location['complete_name']} (ID: {location['id']})")
+                return location['id']
+
+            logger.error(f"❌ Ubicación '{location_name}' no encontrada dentro de TODO/Stock")
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ Error al buscar ubicación TODO/Stock/{location_name}: {e}")
+            return None
+
     def _get_or_create_supplier(self) -> Optional[int]:
         """Obtener o crear proveedor 'PR Autopartes (Scraping)'"""
         try:
