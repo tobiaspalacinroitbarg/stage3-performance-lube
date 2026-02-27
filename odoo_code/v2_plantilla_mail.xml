@@ -1,0 +1,55 @@
+<div style="font-family: 'Lucida Grande', 'Lucida Sans Unicode', Verdana, Arial, Helvetica, sans-serif; font-size: 13px; color: #333;" data-oe-version="1.2">
+    <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 15px; margin-bottom: 20px;">
+        <h2 style="border-radius:0px;border-style:none;padding:0px;margin:0px 0 8px 0;box-sizing:border-box;font-size:21px;line-height:1.2;font-weight:500;font-family:'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Ubuntu, 'Noto Sans', Arial, sans-serif;color: #856404; margin-top: 0;">⚠️ Aviso de Stock: Proveedores Externos (Scraping)</h2>
+        <p style="margin:0px 0 16px 0;">Se ha generado una reserva de stock que toma mercadería de <b>proveedores externos (scraping)</b> para la siguiente operación:</p>
+        <ul style="padding:0 0 0 32px;margin:0px 0 16px 0;list-style-type:disc;">
+            <li><strong>Orden de Venta (Origen):</strong> <t t-out="object.origin or 'No definida'"></t></li>
+            <li><strong>Remito / Picking:</strong> <a t-att-href="object.get_base_url() + '/web#id=' + str(object.id) + '&amp;model=stock.picking&amp;view_type=form'" style="text-decoration:none;font-weight: bold; color: #856404;"><t t-out="object.name"></t></a></li>
+        </ul>
+    </div>
+
+    <p><strong>Detalle de items por proveedor:</strong></p>
+    
+    <!-- Tabla de items agrupados por ubicación/proveedor -->
+    <table style="width: 100%; border-collapse: collapse; border: 1px solid #dddddd; color: #333333; font-size: 13px; margin-bottom: 15px;" width="100%">
+        <thead style="background-color: #f2f2f2;">
+            <tr>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Proveedor (Ubicación)</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Producto</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Cantidad</th>
+            </tr>
+        </thead>
+        <tbody>
+            <t t-foreach="object.move_line_ids" t-as="line">
+                <t t-if="'- Scraping' in (line.location_id.name or '')">
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd; color: #cc0000; font-weight: bold;">
+                            <t t-out="line.location_id.name"></t>
+                        </td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">
+                            [<t t-out="line.product_id.default_code or ''"></t>] <t t-out="line.product_id.name"></t>
+                        </td>
+                        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
+                            <strong><t t-out="line.quantity if line.quantity > 0 else (line.reserved_uom_qty if hasattr(line, 'reserved_uom_qty') else 0)"></t></strong>
+                        </td>
+                    </tr>
+                </t>
+            </t>
+        </tbody>
+    </table>
+
+    <div style="background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin-bottom: 15px;">
+        <p style="margin: 0;"><strong>📋 Acción requerida:</strong> Se generará automáticamente una Orden de Compra para cada proveedor involucrado. Verificar el estado de las POs en el picking.</p>
+    </div>
+
+    <br/>
+    <p style="color: #777; font-size: 11px;">
+        Este es un mensaje automático. Por favor, verificar el estado físico de la mercadería antes de proceder.
+    </p>
+    
+    <div style="margin-top: 20px;">
+        <a t-att-href="object.get_base_url() + '/web#id=' + str(object.id) + '&amp;model=stock.picking&amp;view_type=form'" style="background-color: #875a7b; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; color: #ffffff;">
+           Ver Picking en Odoo
+        </a>
+    </div>
+</div>

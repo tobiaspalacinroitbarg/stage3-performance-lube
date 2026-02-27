@@ -1,0 +1,49 @@
+<div style="font-family: 'Lucida Grande', 'Lucida Sans Unicode', Verdana, Arial, Helvetica, sans-serif; font-size: 13px; color: #333;" data-oe-version="1.2">
+    <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 15px; margin-bottom: 20px;">
+        <h2 style="border-radius:0px;border-style:none;padding:0px;margin:0px 0 8px 0;box-sizing:border-box;border-left-color:#856404;border-bottom-color:#856404;border-right-color:#856404;border-top-color:#856404;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;font-size:21px;line-height:1.2;font-weight:500;font-family:'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Ubuntu, 'Noto Sans', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';color: #856404; margin-top: 0;">⚠️ Aviso de Stock: Recupero/Scraper</h2>
+        <p style="border-radius:0px;border-style:none;padding:0px;margin:0px 0 16px 0;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;">Se ha generado una reserva de stock que toma mercadería del Scraper para la siguiente operación:</p>
+        <ul style="border-radius:0px;border-style:none;padding:0 0 0 32px;margin:0px 0 16px 0;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;list-style-type:disc;">
+            <li><strong style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;font-weight:bolder;">Orden de Venta (Origen):</strong> <t t-out="object.origin or 'No definida'"></t></li>
+            <li><strong style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;font-weight:bolder;">Remito / Picking:</strong> <a t-att-href="object.get_base_url() + '/web#id=' + str(object.id) + '&amp;model=stock.picking&amp;view_type=form'" style="text-decoration:none;border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#856404;border-bottom-color:#856404;border-right-color:#856404;border-top-color:#856404;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;font-weight: bold; color: #856404;"><t t-out="object.name"></t></a></li>
+        </ul>
+    </div>
+
+    <p style="border-radius:0px;border-style:none;padding:0px;margin:0px 0 16px 0;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;"><strong style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;font-weight:bolder;">Detalle de items tomados del Scraper:</strong></p>
+    
+    <t t-foreach="object.move_line_ids" t-as="line">
+                <t t-if="'SCRAP' in line.location_id.complete_name.upper()">
+                    </t></t><table style="border-radius: 0px; padding: 0px; margin: 0px; box-sizing: border-box; caption-side: bottom; width: 100%; border-collapse: collapse; border: 1px solid #dddddd; color: #333333; font-size: 13px; font-family: 'Lucida Grande', 'Lucida Sans Unicode', Verdana, Arial, Helvetica, sans-serif;" width="100%">
+        <thead style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;background-color: #f2f2f2;">
+            <tr style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;">
+                <th style="border-radius:0px;border-style:solid;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:1px;border-bottom-width:1px;border-right-width:1px;border-top-width:1px;font-weight:500;padding: 8px; border: 1px solid #ddd; text-align: left;">Producto</th>
+                <th style="border-radius:0px;border-style:solid;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:1px;border-bottom-width:1px;border-right-width:1px;border-top-width:1px;font-weight:500;padding: 8px; border: 1px solid #ddd; text-align: center;">Cantidad</th>
+                <th style="border-radius:0px;border-style:solid;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:1px;border-bottom-width:1px;border-right-width:1px;border-top-width:1px;font-weight:500;padding: 8px; border: 1px solid #ddd; text-align: right;">Ubicación</th>
+            </tr>
+        </thead>
+        <tbody style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;">
+            <tr style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;">
+                        <td style="border-radius:0px;border-style:solid;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:1px;border-bottom-width:1px;border-right-width:1px;border-top-width:1px;padding: 8px; border: 1px solid #ddd;">
+                            <t t-out="line.product_id.name"></t>
+                        </td>
+                        <td style="border-radius:0px;border-style:solid;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:1px;border-bottom-width:1px;border-right-width:1px;border-top-width:1px;padding: 8px; border: 1px solid #ddd; text-align: center;">
+                            <strong style="border-radius:0px;border-style:none;padding:0px;margin:0px;box-sizing:border-box;border-left-color:#333333;border-bottom-color:#333333;border-right-color:#333333;border-top-color:#333333;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;font-weight:bolder;"><t t-out="line.quantity if line.quantity &gt; 0 else (line.product_uom_qty if hasattr(line, 'product_uom_qty') else 0)"></t></strong>
+                        </td>
+                        <td style="border-radius:0px;border-style:solid;margin:0px;box-sizing:border-box;border-left-color:#dddddd;border-bottom-color:#dddddd;border-right-color:#dddddd;border-top-color:#dddddd;border-left-width:1px;border-bottom-width:1px;border-right-width:1px;border-top-width:1px;padding: 8px; border: 1px solid #ddd; text-align: right; color: #ff0000;">
+                            <t t-out="line.location_id.name"></t>
+                        </td>
+                    </tr>
+                
+            
+        </tbody>
+    </table>
+
+    <br/>
+    <p style="border-radius:0px;border-style:none;padding:0px;margin:0px 0 16px 0;box-sizing:border-box;border-left-color:#777777;border-bottom-color:#777777;border-right-color:#777777;border-top-color:#777777;border-left-width:0px;border-bottom-width:0px;border-right-width:0px;border-top-width:0px;color: #777; font-size: 11px;">
+        Este es un mensaje automático. Por favor, verificar el estado físico de la mercadería antes de proceder.
+    </p>
+    
+    <div style="margin-top: 20px;">
+        <a t-att-href="object.get_base_url() + '/web#id=' + str(object.id) + '&amp;model=stock.picking&amp;view_type=form'" style="border-style: none; margin: 0px; box-sizing: border-box; border-color: #008f8c; border-width: 0px; color: #333333; background-color: #875a7b; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;"><font style="color: #ffffff;">
+           Ver Picking en Odoo&nbsp;</font></a>
+    </div>
+</div>
