@@ -19,6 +19,7 @@ Uso:
 """
 import os
 import sys
+import time
 import argparse
 from dotenv import load_dotenv
 import xmlrpc.client
@@ -213,32 +214,45 @@ def main():
     
     # Crear reglas
     print("\n" + "-" * 60)
-    print("CREANDO REGLAS...")
+    print("CREANDO REGLAS (con delay de 0.5s entre cada una)...")
     print("-" * 60)
     
     created = []
     errors = []
     
-    for item in to_create:
-        try:
-            models.execute_kw(db, uid, password,
-                'stock.warehouse.orderpoint', 'create',
-                [{
-                    'product_id': item['product_id'],
-                    'location_id': LOCATION_ID,
-                    'warehouse_id': WAREHOUSE_ID,
-                    'product_min_qty': PRODUCT_MIN_QTY,
-                    'product_max_qty': PRODUCT_MAX_QTY,
-                    'product_uom': item['uom_id'],
-                    'trigger': TRIGGER,
-                    'route_id': ROUTE_ID
-                }]
-            )
-            created.append(item)
-            print(f"  Creada: [{item['default_code']}] {item['name'][:40]}")
-        except Exception as e:
-            errors.append((item, str(e)))
-            print(f"  ERROR [{item['default_code']}]: {e}")
+    for i, item in enumerate(to_create):
+        # Retry con backoff exponencial
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                models.execute_kw(db, uid, password,
+                    'stock.warehouse.orderpoint', 'create',
+                    [{
+                        'product_id': item['product_id'],
+                        'location_id': LOCATION_ID,
+                        'warehouse_id': WAREHOUSE_ID,
+                        'product_min_qty': PRODUCT_MIN_QTY,
+                        'product_max_qty': PRODUCT_MAX_QTY,
+                        'product_uom': item['uom_id'],
+                        'trigger': TRIGGER,
+                        'route_id': ROUTE_ID
+                    }]
+                )
+                created.append(item)
+                print(f"  [{i+1}/{len(to_create)}] Creada: [{item['default_code']}] {item['name'][:40]}")
+                break  # Éxito, salir del retry loop
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2  # 2s, 4s, 6s
+                    print(f"  [{item['default_code']}] Rate limited, esperando {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                errors.append((item, str(e)))
+                print(f"  ERROR [{item['default_code']}]: {e}")
+                break
+        
+        # Delay entre requests para evitar rate limiting
+        time.sleep(0.5)
     
     # Resumen final
     print("\n" + "=" * 60)
