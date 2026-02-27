@@ -20,7 +20,7 @@
 SCRAPING_LOCATIONS = {
     'PR - Scraping': 'PR SH DE OLIVEIRA ROBERTO Y JUAN QUIROZ',
     'SV - Scraping': 'SERVICIOS VIALES DE SANTA FE S A',
-    'Bluecar - Scraping': 'BLUECAR S.A',
+    # 'Bluecar - Scraping': 'BLUECAR S.A',  # TODO: Habilitar cuando Bluecar esté listo
 }
 SCRAPING_SUFFIX = '- Scraping'
 ID_PLANTILLA_MAIL = 59  # ID de la plantilla de correo en Odoo

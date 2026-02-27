@@ -25,7 +25,7 @@
 SCRAPING_LOCATIONS = {
     'PR - Scraping': 'PR SH DE OLIVEIRA ROBERTO Y JUAN QUIROZ',
     'SV - Scraping': 'SERVICIOS VIALES DE SANTA FE S A',
-    'Bluecar - Scraping': 'BLUECAR S.A',
+    # 'Bluecar - Scraping': 'BLUECAR S.A',  # TODO: Habilitar cuando Bluecar esté listo
 }
 SCRAPING_SUFFIX = '- Scraping'
 SCRAPING_PROVIDERS = list(SCRAPING_LOCATIONS.values())

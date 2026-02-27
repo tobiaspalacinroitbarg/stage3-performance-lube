@@ -14,7 +14,7 @@ La configuración debe copiarse al inicio de cada script de automatización en O
 SCRAPING_LOCATIONS = {
     'PR - Scraping': 'PR SH DE OLIVEIRA ROBERTO Y JUAN QUIROZ',
     'SV - Scraping': 'SERVICIOS VIALES DE SANTA FE S A',
-    'Bluecar - Scraping': 'BLUECAR S.A',
+    # 'Bluecar - Scraping': 'BLUECAR S.A',  # TODO: Habilitar cuando Bluecar esté listo
 }
 
 # Sufijo común para detectar ubicaciones de scraping
