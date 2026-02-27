@@ -3,7 +3,7 @@
 # =============================================================================
 FROM python:3.11-slim
 
-# Instalar dependencias del sistema (Chrome para PR y Bluecar)
+# Instalar dependencias del sistema (Chrome para PR y Bluecar + gcc para psutil)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
     cron \
+    gcc \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Crear enlaces simbólicos para compatibilidad
