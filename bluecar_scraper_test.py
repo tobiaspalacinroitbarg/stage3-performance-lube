@@ -713,16 +713,16 @@ class BluecarProductMatcher:
 
             logger.info("🔄 Preparando datos cacheados de Odoo...")
 
-            # Obtener location_id de TODO/Stock/StockSCRAP
-            location_id = self.odoo_connector._get_depo_scraping_location()
+            # Obtener location_id de TODO/Stock/Bluecar - Scraping
+            location_id = self.odoo_connector._get_scraping_location_by_name('Bluecar - Scraping')
             if not location_id:
-                logger.error("❌ No se encontró ubicación TODO/Stock/StockSCRAP")
+                logger.error("❌ No se encontró ubicación TODO/Stock/Bluecar - Scraping")
                 return None
 
-            # Obtener supplier_id para Bluecar (o crearlo)
-            supplier_id = self._get_or_create_bluecar_supplier()
+            # Obtener supplier_id para Bluecar
+            supplier_id = self._get_bluecar_supplier()
             if not supplier_id:
-                logger.warning("⚠️ No se pudo crear proveedor Bluecar")
+                logger.warning("⚠️ No se encontró proveedor BLUECAR S.A")
 
             # Obtener información de productos coincidentes
             product_info = {}
@@ -784,40 +784,19 @@ class BluecarProductMatcher:
             traceback.print_exc()
             return None
 
-    def _get_or_create_bluecar_supplier(self) -> Optional[int]:
-        """Obener o crear proveedor Bluecar"""
+    def _get_bluecar_supplier(self) -> Optional[int]:
+        """Obtener proveedor BLUECAR S.A existente en Odoo"""
         try:
-            suppliers = self.odoo_connector.models.execute_kw(
-                self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
-                'res.partner', 'search_read',
-                [[['name', '=', 'Bluecar SA (Scraping)'], ['supplier_rank', '>', 0]]],
-                {'fields': ['id', 'name']}
-            )
-
-            if suppliers:
-                logger.info(f"✅ Proveedor Bluecar existente: {suppliers[0]['id']}")
-                return suppliers[0]['id']
-
-            # Crear nuevo proveedor
-            logger.info("➕ Creando proveedor 'Bluecar SA (Scraping)'...")
-            supplier_id = self.odoo_connector.models.execute_kw(
-                self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
-                'res.partner', 'create',
-                [{
-                    'name': 'Bluecar SA (Scraping)',
-                    'company_type': 'company',
-                    'supplier_rank': 1,
-                    'customer_rank': 0,
-                    'is_company': True,
-                    'email': 'info@bluecar.com.ar',
-                    'comment': 'Proveedor automático generado por sistema de scraping - Bluecar SA'
-                }]
-            )
-            logger.info(f"✅ Proveedor 'Bluecar SA (Scraping)' creado: {supplier_id}")
-            return supplier_id
+            supplier_id = self.odoo_connector._get_supplier_id_by_name('BLUECAR S.A')
+            if supplier_id:
+                logger.info(f"✅ Proveedor BLUECAR S.A encontrado: {supplier_id}")
+                return supplier_id
+            
+            logger.error("❌ Proveedor 'BLUECAR S.A' no encontrado en Odoo")
+            return None
 
         except Exception as e:
-            logger.error(f"❌ Error creando proveedor Bluecar: {e}")
+            logger.error(f"❌ Error buscando proveedor BLUECAR S.A: {e}")
             return None
 
     def upload_to_odoo(self, cached_data: Dict, dry_run: bool = True) -> Dict:
