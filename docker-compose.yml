@@ -1,0 +1,121 @@
+# =============================================================================
+# Docker Compose - Scrapers PR y SV
+# =============================================================================
+# 
+# Uso:
+#   docker-compose up -d              # Levantar ambos con cron
+#   docker-compose up pr-scraper -d   # Solo PR
+#   docker-compose up sv-scraper -d   # Solo SV
+#
+#   docker-compose run --rm pr-scraper-manual   # Ejecutar PR manualmente
+#   docker-compose run --rm sv-scraper-manual   # Ejecutar SV manualmente
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # PR SCRAPER - PR Autopartes
+  # ===========================================================================
+  pr-scraper:
+    build: .
+    container_name: pr-scraper
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+      - SCRAPER_NAME=PR
+      - SCRAPER_SCHEDULE=${PR_SCHEDULE:-0 */2 * * *}
+    command: >
+      bash -c "
+        echo 'PR Scraper - Iniciando con cron: $$SCRAPER_SCHEDULE' &&
+        echo \"$$SCRAPER_SCHEDULE cd /app && python main.py >> /app/logs/pr-scraper.log 2>&1\" > /etc/cron.d/scraper &&
+        chmod 0644 /etc/cron.d/scraper &&
+        crontab /etc/cron.d/scraper &&
+        echo 'Cron configurado. Ejecutando primera corrida...' &&
+        python main.py &&
+        echo 'Primera corrida completada. Iniciando cron daemon...' &&
+        cron -f
+      "
+    restart: unless-stopped
+
+  # PR Scraper - Ejecución manual (one-shot)
+  pr-scraper-manual:
+    build: .
+    container_name: pr-scraper-manual
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+    command: python main.py
+    profiles: ["manual"]
+
+  # ===========================================================================
+  # SV SCRAPER - Servicios Viales
+  # ===========================================================================
+  sv-scraper:
+    build: .
+    container_name: sv-scraper
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+      - SCRAPER_NAME=SV
+      - SCRAPER_SCHEDULE=${SV_SCHEDULE:-0 */4 * * *}
+    command: >
+      bash -c "
+        echo 'SV Scraper - Iniciando con cron: $$SCRAPER_SCHEDULE' &&
+        echo \"$$SCRAPER_SCHEDULE cd /app && python sv_scraper_v2.py >> /app/logs/sv-scraper.log 2>&1\" > /etc/cron.d/scraper &&
+        chmod 0644 /etc/cron.d/scraper &&
+        crontab /etc/cron.d/scraper &&
+        echo 'Cron configurado. Ejecutando primera corrida...' &&
+        python sv_scraper_v2.py &&
+        echo 'Primera corrida completada. Iniciando cron daemon...' &&
+        cron -f
+      "
+    restart: unless-stopped
+
+  # SV Scraper - Ejecución manual (one-shot)
+  sv-scraper-manual:
+    build: .
+    container_name: sv-scraper-manual
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+    command: python sv_scraper_v2.py
+    profiles: ["manual"]
+
+  # ===========================================================================
+  # SV SCRAPER DRY-RUN - Para testing
+  # ===========================================================================
+  sv-scraper-dry:
+    build: .
+    container_name: sv-scraper-dry
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+    command: python sv_scraper_v2.py --dry-run
+    profiles: ["test"]
