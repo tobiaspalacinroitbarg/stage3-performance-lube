@@ -2313,6 +2313,17 @@ class PrAutoParteScraper:
             
             if not last_page_button:
                 raise ValueError("No se pudo encontrar el botón de paginación con ningún selector")
+            
+            # Guardar el selector que funcionó para re-usarlo
+            working_selector = selectors[0]  # El primero que funcionó
+            for s in selectors:
+                try:
+                    self._wait_and_find_element(By.XPATH, s, timeout=2)
+                    working_selector = s
+                    break
+                except:
+                    continue
+            
             last_page_button.click()
             time.sleep(3)
             self._scroll_to_bottom()
@@ -2328,8 +2339,9 @@ class PrAutoParteScraper:
             if not bearer_token:
                 raise ValueError("Token de autorización no encontrado")
             
-            # Obtener número total de páginas (reusar el selector que funcionó)
-            num_pages = int(last_page_button.text) + 1
+            # Re-buscar el elemento después del click (evitar stale element)
+            last_page_element = self._wait_and_find_element(By.XPATH, working_selector, timeout=10)
+            num_pages = int(last_page_element.text) + 1
             
             logger.info(f"Login exitoso. Páginas encontradas: {num_pages}")
             logger.info(f"Token obtenido: {bearer_token[:20]}...")
