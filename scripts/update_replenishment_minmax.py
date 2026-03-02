@@ -69,7 +69,7 @@ def connect_odoo():
 
 
 def get_orderpoints_with_rotation(models, uid, db, password):
-    """Obtener orderpoints con warehouse_rotation >= 0"""
+    """Obtener orderpoints con warehouse_rotation >= 0 (paginado para evitar timeout)"""
     print("\nObteniendo orderpoints con rotación...")
     
     orderpoint_ids = models.execute_kw(db, uid, password,
@@ -78,11 +78,34 @@ def get_orderpoints_with_rotation(models, uid, db, password):
     )
     print(f"  Orderpoints encontrados: {len(orderpoint_ids)}")
 
-    orderpoints = models.execute_kw(db, uid, password,
-        'stock.warehouse.orderpoint', 'read',
-        [orderpoint_ids],
-        {'fields': ['id', 'warehouse_rotation', 'product_min_qty', 'product_max_qty', 'product_id']}
-    )
+    # Leer en batches para evitar timeout
+    BATCH_SIZE = 1000
+    orderpoints = []
+    
+    for i in range(0, len(orderpoint_ids), BATCH_SIZE):
+        batch_ids = orderpoint_ids[i:i + BATCH_SIZE]
+        
+        # Retry con backoff
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                batch = models.execute_kw(db, uid, password,
+                    'stock.warehouse.orderpoint', 'read',
+                    [batch_ids],
+                    {'fields': ['id', 'warehouse_rotation', 'product_min_qty', 'product_max_qty', 'product_id']}
+                )
+                orderpoints.extend(batch)
+                print(f"  Leídos {len(orderpoints)}/{len(orderpoint_ids)}...")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    print(f"  Error leyendo batch, reintentando en {wait_time}s... ({e})")
+                    time.sleep(wait_time)
+                    continue
+                raise
+        
+        time.sleep(0.2)  # Pequeño delay entre batches
     
     return orderpoints
 
