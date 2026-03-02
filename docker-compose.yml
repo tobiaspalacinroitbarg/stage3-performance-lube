@@ -171,6 +171,30 @@ services:
       - ./logs:/app/logs
     environment:
       - TZ=America/Argentina/Buenos_Aires
+      - MINMAX_SCHEDULE=${MINMAX_SCHEDULE:-0 6 * * *}
+    command: >
+      bash -c "
+        echo 'Replenishment Min/Max - Cron: $$MINMAX_SCHEDULE (6 AM Argentina)' &&
+        echo \"$$MINMAX_SCHEDULE cd /app && python scripts/update_replenishment_minmax.py >> /app/logs/replenishment-minmax.log 2>&1\" > /etc/cron.d/minmax &&
+        chmod 0644 /etc/cron.d/minmax &&
+        crontab /etc/cron.d/minmax &&
+        echo 'Ejecutando primera corrida...' &&
+        python scripts/update_replenishment_minmax.py &&
+        echo 'Primera corrida completada. Iniciando cron daemon...' &&
+        cron -f
+      "
+    restart: unless-stopped
+
+  replenishment-minmax-manual:
+    build: .
+    container_name: replenishment-minmax-manual
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
     command: python scripts/update_replenishment_minmax.py
     profiles: ["manual"]
 
