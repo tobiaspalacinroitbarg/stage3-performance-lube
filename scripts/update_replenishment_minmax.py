@@ -127,49 +127,34 @@ def main():
     # Obtener orderpoints
     orderpoints = get_orderpoints_with_rotation(models, uid, db, password)
     
-    # Agrupar por (new_min, new_max) los que necesitan update
+    # Agrupar por (new_min, new_max) - actualizar TODOS sin excepción
     updates = defaultdict(list)
-    skipped_no_rotation = 0
-    skipped_already_correct = 0
+    skipped_null_rotation = 0
     
     print("\nAnalizando orderpoints...")
     
     for op in orderpoints:
         warehouse_rotation = op.get('warehouse_rotation')
-        current_min = op.get('product_min_qty')
-        current_max = op.get('product_max_qty')
         op_id = op['id']
         
-        # Saltar si no tiene rotación válida
-        if warehouse_rotation is None or warehouse_rotation <= 0:
-            skipped_no_rotation += 1
+        # Solo saltar si rotación es None (null en DB)
+        if warehouse_rotation is None:
+            skipped_null_rotation += 1
             continue
         
-        # Calcular nuevos valores
-        new_min = float(math.ceil(warehouse_rotation))
-        new_max = float(math.ceil(warehouse_rotation) * 2)
+        # Calcular nuevos valores (rotación >= 0)
+        new_min = float(math.ceil(warehouse_rotation)) if warehouse_rotation > 0 else 0.0
+        new_max = float(math.ceil(warehouse_rotation) * 2) if warehouse_rotation > 0 else 0.0
         
-        # Saltar si ya está correcto
-        if current_min == new_min and current_max == new_max:
-            skipped_already_correct += 1
-            continue
-        
-        # Agregar al grupo correspondiente
-        updates[(new_min, new_max)].append({
-            'id': op_id,
-            'product_id': op.get('product_id'),
-            'rotation': warehouse_rotation,
-            'old_min': current_min,
-            'old_max': current_max
-        })
+        # Agregar al grupo correspondiente (sin skipear ninguno)
+        updates[(new_min, new_max)].append(op_id)
     
     total_to_update = sum(len(ops) for ops in updates.values())
     
     # Resumen
     print(f"\nResumen:")
     print(f"  A actualizar:          {total_to_update}")
-    print(f"  Ya correctos:          {skipped_already_correct}")
-    print(f"  Sin rotación válida:   {skipped_no_rotation}")
+    print(f"  Sin rotación (null):   {skipped_null_rotation}")
     print(f"  Grupos de update:      {len(updates)}")
     
     if not updates:
@@ -182,13 +167,8 @@ def main():
         print("CAMBIOS QUE SE HARÍAN:")
         print("-" * 60)
         
-        for (new_min, new_max), ops in sorted(updates.items()):
-            print(f"\n  min={new_min}, max={new_max} ({len(ops)} orderpoints):")
-            for op in ops[:3]:  # Mostrar máx 3 ejemplos
-                product_name = op['product_id'][1] if op['product_id'] else 'N/A'
-                print(f"    - {product_name[:40]} (rot={op['rotation']:.1f}, actual: {op['old_min']}/{op['old_max']})")
-            if len(ops) > 3:
-                print(f"    ... y {len(ops) - 3} más")
+        for (new_min, new_max), op_ids in sorted(updates.items()):
+            print(f"  min={new_min}, max={new_max} -> {len(op_ids)} orderpoints")
         
         print("\n" + "-" * 60)
         print("[DRY-RUN] No se realizaron cambios.")
@@ -203,8 +183,7 @@ def main():
     error_count = 0
     total_groups = len(updates)
     
-    for i, ((new_min, new_max), ops) in enumerate(sorted(updates.items()), 1):
-        op_ids = [op['id'] for op in ops]
+    for i, ((new_min, new_max), op_ids) in enumerate(sorted(updates.items()), 1):
         
         # Retry con backoff
         max_retries = 3
@@ -214,8 +193,8 @@ def main():
                     'stock.warehouse.orderpoint', 'write',
                     [op_ids, {'product_min_qty': new_min, 'product_max_qty': new_max}]
                 )
-                updated_count += len(ops)
-                print(f"  [{i}/{total_groups}] Actualizados {len(ops)} orderpoints -> min={new_min}, max={new_max} (Total: {updated_count}/{total_to_update})")
+                updated_count += len(op_ids)
+                print(f"  [{i}/{total_groups}] Actualizados {len(op_ids)} orderpoints -> min={new_min}, max={new_max} (Total: {updated_count}/{total_to_update})")
                 break
             except Exception as e:
                 if "429" in str(e) and attempt < max_retries - 1:
@@ -224,7 +203,7 @@ def main():
                     time.sleep(wait_time)
                     continue
                 print(f"  [{i}/{total_groups}] ERROR: {e}")
-                error_count += len(ops)
+                error_count += len(op_ids)
                 break
         
         # Delay entre grupos
@@ -236,8 +215,7 @@ def main():
     print("=" * 60)
     print(f"  Actualizados:   {updated_count}")
     print(f"  Errores:        {error_count}")
-    print(f"  Ya correctos:   {skipped_already_correct}")
-    print(f"  Sin rotación:   {skipped_no_rotation}")
+    print(f"  Sin rotación:   {skipped_null_rotation}")
 
 
 if __name__ == "__main__":
