@@ -315,7 +315,7 @@ class SVScraperV2:
         turbo_with_sv_ids = set()
         if turbo_id:
             # Obtener todos los supplierinfo de ambos proveedores
-            all_supplierinfo = self.odoo_connector.models.execute_kw(
+            all_supplierinfo = self.odoo_connector.execute_kw(
                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                 'product.supplierinfo', 'search_read',
                 [[['partner_id', 'in', [sv_id, turbo_id]]]],
@@ -346,7 +346,7 @@ class SVScraperV2:
             
             # Obtener product_ids de estos templates
             if turbo_primary_sv_secondary:
-                products = self.odoo_connector.models.execute_kw(
+                products = self.odoo_connector.execute_kw(
                     self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                     'product.product', 'search',
                     [[['product_tmpl_id', 'in', turbo_primary_sv_secondary]]]
@@ -373,7 +373,7 @@ class SVScraperV2:
             max_retries = 5
             for attempt in range(max_retries):
                 try:
-                    products = self.odoo_connector.models.execute_kw(
+                    products = self.odoo_connector.execute_kw(
                         self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                         'product.product', 'read',
                         [batch],
@@ -585,7 +585,7 @@ class SVScraperV2:
         
         existing_quants = {}
         if product_ids:
-            quants = self.odoo_connector.models.execute_kw(
+            quants = self.odoo_connector.execute_kw(
                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                 'stock.quant', 'search_read',
                 [[['product_id', 'in', product_ids], ['location_id', '=', self.location_id]]],
@@ -650,7 +650,7 @@ class SVScraperV2:
             quant_ids = [item[0] for item in items]
             codes = [item[1] for item in items]
             try:
-                self.odoo_connector.models.execute_kw(
+                self.odoo_connector.execute_kw(
                     self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                     'stock.quant', 'write',
                     [quant_ids, {'quantity': quantity}]
@@ -682,7 +682,7 @@ class SVScraperV2:
                 ]
                 
                 try:
-                    created_ids = self.odoo_connector.models.execute_kw(
+                    created_ids = self.odoo_connector.execute_kw(
                         self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                         'stock.quant', 'create',
                         [records]
@@ -694,7 +694,7 @@ class SVScraperV2:
                     # Fallback: crear uno por uno
                     for product_id, quantity, code in batch:
                         try:
-                            self.odoo_connector.models.execute_kw(
+                            self.odoo_connector.execute_kw(
                                 self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                                 'stock.quant', 'create',
                                 [{
@@ -724,7 +724,7 @@ class SVScraperV2:
             return False
         
         # Mostrar ubicación
-        location_info = self.odoo_connector.models.execute_kw(
+        location_info = self.odoo_connector.execute_kw(
             self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
             'stock.location', 'read',
             [[self.location_id]],

@@ -205,7 +205,7 @@ class OdooConnector:
 
         try:
             # 1. Primero buscar coincidencia exacta
-            product_ids = self.models.execute_kw(
+            product_ids = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.product', 'search_read',
                 [[['default_code', '=', product_code]]],
@@ -221,7 +221,7 @@ class OdooConnector:
             normalized_code = CodeNormalizer.normalize_code(product_code)
 
             # Obtener todos los productos con códigos (para matching normalizado)
-            all_products = self.models.execute_kw(
+            all_products = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.product', 'search_read',
                 [[['default_code', '!=', False]]],
@@ -366,7 +366,7 @@ class OdooConnector:
 
             # Verificar si el producto es un kit antes de intentar actualizar stock
             try:
-                product_info = self.models.execute_kw(
+                product_info = self.execute_kw(
                     self.db, self.uid, self.password,
                     'product.product', 'read',
                     [[product_id]],
@@ -377,7 +377,7 @@ class OdooConnector:
                     template_id = product_info[0]['product_tmpl_id'][0]
 
                     # Verificar si el producto es un kit (tiene boms)
-                    boms = self.models.execute_kw(
+                    boms = self.execute_kw(
                         self.db, self.uid, self.password,
                         'mrp.bom', 'search_read',
                         [[['product_tmpl_id', '=', template_id]]],
@@ -395,7 +395,7 @@ class OdooConnector:
             # Siempre actualizar o crear inventario (incluso si stock_quantity es 0)
 
             # Buscar si ya existe un registro de inventario para este producto en esta ubicación
-            existing_quants = self.models.execute_kw(
+            existing_quants = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.quant', 'search_read',
                 [[['product_id', '=', product_id], ['location_id', '=', todo_stock_scrap_location_id]]],
@@ -405,7 +405,7 @@ class OdooConnector:
             if existing_quants:
                 # Actualizar cantidad existente
                 quant_id = existing_quants[0]['id']
-                self.models.execute_kw(
+                self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.quant', 'write',
                     [[quant_id], {'quantity': stock_quantity}]
@@ -413,7 +413,7 @@ class OdooConnector:
                 logger.info(f"📦 Stock actualizado en TODO/Stock/PR - Scraping: {product_data.get('codigo')} - {stock_quantity} unidades")
             else:
                 # Crear nuevo registro de inventario
-                self.models.execute_kw(
+                self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.quant', 'create',
                     [{
@@ -440,7 +440,7 @@ class OdooConnector:
         """Establecer regla de reposición en '-35' para el producto con debugging mejorado"""
         try:
             # Obtener el template_id del producto
-            product_info = self.models.execute_kw(
+            product_info = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.product', 'read',
                 [[product_id]],
@@ -458,7 +458,7 @@ class OdooConnector:
             logger.info(f"📋 Template ID: {template_id} | Product ID: {product_id}")
 
             # Búsqueda más amplia de reglas existentes para debugging
-            existing_rules = self.models.execute_kw(
+            existing_rules = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.warehouse.orderpoint', 'search_read',
                 [[['product_tmpl_id', '=', template_id]]],
@@ -466,7 +466,7 @@ class OdooConnector:
             )
 
             # También buscar reglas por product_id (alternativa)
-            rules_by_product = self.models.execute_kw(
+            rules_by_product = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.warehouse.orderpoint', 'search_read',
                 [[['product_id', '=', product_id]]],
@@ -499,7 +499,7 @@ class OdooConnector:
                 logger.info(f"📈 Valores anteriores: Min={old_min}, Max={old_max}, Location={location_id}")
                 logger.info(f"📈 Nuevos valores: Min=-35, Max=-34")
 
-                update_result = self.models.execute_kw(
+                update_result = self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.warehouse.orderpoint', 'write',
                     [[rule_id], {
@@ -538,7 +538,7 @@ class OdooConnector:
 
                 logger.info(f"📝 Datos de nueva regla: {new_rule_data}")
 
-                rule_id = self.models.execute_kw(
+                rule_id = self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.warehouse.orderpoint', 'create',
                     [new_rule_data]
@@ -588,7 +588,7 @@ class OdooConnector:
             # Actualizar precio de costo del producto solo si es válido
             if precio_costo > 0:
                 try:
-                    self.models.execute_kw(
+                    self.execute_kw(
                         self.db, self.uid, self.password,
                         'product.product', 'write',
                         [[product_id], {'standard_price': precio_costo}]
@@ -607,7 +607,7 @@ class OdooConnector:
 
             # Usar el product_template_id en lugar de product_id para supplierinfo
             try:
-                product_template_data = self.models.execute_kw(
+                product_template_data = self.execute_kw(
                     self.db, self.uid, self.password,
                     'product.product', 'read',
                     [[product_id]],
@@ -629,7 +629,7 @@ class OdooConnector:
             }
 
             # Buscar si ya existe un seller para este producto y proveedor
-            existing_sellers = self.models.execute_kw(
+            existing_sellers = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.supplierinfo', 'search_read',
                 [[['product_tmpl_id', '=', template_id], ['partner_id', '=', supplier_id]]],
@@ -639,7 +639,7 @@ class OdooConnector:
             if existing_sellers:
                 # Actualizar seller existente
                 seller_id = existing_sellers[0]['id']
-                self.models.execute_kw(
+                self.execute_kw(
                     self.db, self.uid, self.password,
                     'product.supplierinfo', 'write',
                     [[seller_id], seller_info]
@@ -647,7 +647,7 @@ class OdooConnector:
                 logger.info(f"🛒 Info de compra actualizada: {product_code} - Precio: ${precio_costo} - Cantidad mínima: {min_qty} (Stock: {disponibilidad})")
             else:
                 # Crear nuevo seller
-                seller_id = self.models.execute_kw(
+                seller_id = self.execute_kw(
                     self.db, self.uid, self.password,
                     'product.supplierinfo', 'create',
                     [seller_info]
@@ -664,7 +664,7 @@ class OdooConnector:
         """Obtener ID de la ubicación 'Scraping' dentro del almacén VLANTE 2 - FUNCIÓN OBSOLETA, usar _get_depo_scraping_location en su lugar"""
         try:
             # Primero buscar el almacén VLANTE 2 por su nombre corto VLANT
-            vlante_warehouses = self.models.execute_kw(
+            vlante_warehouses = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.warehouse', 'search_read',
                 [[['code', '=', 'VLANT']]],
@@ -680,7 +680,7 @@ class OdooConnector:
 
             # Buscar la ubicación VLANT/Scraping (location_id del almacén)
             # En Odoo, las ubicaciones internas del almacén usualmente siguen el patrón: Warehouse Name/Location Name
-            scraping_locations = self.models.execute_kw(
+            scraping_locations = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.location', 'search_read',
                 [[['name', '=', 'Scraping'], ['usage', '=', 'internal'],
@@ -708,7 +708,7 @@ class OdooConnector:
         """Obtener ID de la ubicación 'DEPO existencias' dentro de TODO/Stock"""
         try:
             # Primero buscar el almacén padre 'TODO'
-            todo_warehouses = self.models.execute_kw(
+            todo_warehouses = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.warehouse', 'search_read',
                 [[['name', '=', 'TODO']]],
@@ -723,7 +723,7 @@ class OdooConnector:
             logger.info(f"✅ Almacén TODO encontrado: {todo_warehouse['name']} (ID: {todo_warehouse['id']})")
 
             # Buscar la ubicación 'Stock' dentro de TODO
-            stock_locations = self.models.execute_kw(
+            stock_locations = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.location', 'search_read',
                 [[['name', '=', 'Stock'], ['usage', '=', 'internal'],
@@ -739,7 +739,7 @@ class OdooConnector:
             logger.info(f"✅ Ubicación Stock encontrada: {stock_location['complete_name']} (ID: {stock_location['id']})")
 
             # Buscar la ubicación 'DEPO existencias' dentro de Stock
-            depo_existencias_locations = self.models.execute_kw(
+            depo_existencias_locations = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.location', 'search_read',
                 [[['name', '=', 'DEPO existencias'], ['usage', '=', 'internal'],
@@ -778,7 +778,7 @@ class OdooConnector:
                 return None
 
             # Buscar almacén TODO
-            warehouses = self.models.execute_kw(
+            warehouses = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.warehouse', 'search_read',
                 [[['name', '=', 'TODO']]],
@@ -792,7 +792,7 @@ class OdooConnector:
             warehouse = warehouses[0]
 
             # Buscar ubicación 'Stock' dentro de TODO
-            stock_locations = self.models.execute_kw(
+            stock_locations = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.location', 'search_read',
                 [[['name', '=', 'Stock'], ['usage', '=', 'internal']]],
@@ -806,7 +806,7 @@ class OdooConnector:
             stock_location = stock_locations[0]
 
             # Buscar la ubicación específica dentro de Stock
-            target_locations = self.models.execute_kw(
+            target_locations = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.location', 'search_read',
                 [[['name', '=', location_name], ['usage', '=', 'internal'],
@@ -830,7 +830,7 @@ class OdooConnector:
         """Obtener o crear proveedor 'PR Autopartes (Scraping)'"""
         try:
             # Buscar proveedor existente
-            suppliers = self.models.execute_kw(
+            suppliers = self.execute_kw(
                 self.db, self.uid, self.password,
                 'res.partner', 'search_read',
                 [[['name', '=', 'PR Autopartes (Scraping)'], ['supplier_rank', '>', 0]]],
@@ -842,7 +842,7 @@ class OdooConnector:
 
             # Crear nuevo proveedor
             logger.info("Creando proveedor 'PR Autopartes (Scraping)'...")
-            supplier_id = self.models.execute_kw(
+            supplier_id = self.execute_kw(
                 self.db, self.uid, self.password,
                 'res.partner', 'create',
                 [{
@@ -873,7 +873,7 @@ class OdooConnector:
                 logger.error("No conectado a Odoo")
                 return None
 
-            suppliers = self.models.execute_kw(
+            suppliers = self.execute_kw(
                 self.db, self.uid, self.password,
                 'res.partner', 'search_read',
                 [[['name', '=', supplier_name], ['supplier_rank', '>', 0]]],
@@ -909,7 +909,7 @@ class OdooConnector:
             #    para poder determinar cuál es el proveedor principal de cada uno
 
             # Paso 1: Buscar templates que tienen a este proveedor asociado
-            supplier_sellerinfos = self.models.execute_kw(
+            supplier_sellerinfos = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.supplierinfo', 'search_read',
                 [[['partner_id', '=', supplier_id]]],
@@ -929,7 +929,7 @@ class OdooConnector:
 
             # Paso 2: Obtener TODOS los sellerinfo de SOLO esos templates
             # Esto nos permite comparar y ver quién es el proveedor principal
-            all_sellers_of_templates = self.models.execute_kw(
+            all_sellers_of_templates = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.supplierinfo', 'search_read',
                 [[['product_tmpl_id', 'in', template_ids]]],
@@ -977,7 +977,7 @@ class OdooConnector:
 
             # Paso 4: BÚSQUEDA MASIVA de variantes (1 sola consulta en lugar de N)
             if templates_needing_variants:
-                all_variants = self.models.execute_kw(
+                all_variants = self.execute_kw(
                     self.db, self.uid, self.password,
                     'product.product', 'search_read',
                     [[['product_tmpl_id', 'in', templates_needing_variants]]],
@@ -1000,7 +1000,7 @@ class OdooConnector:
             product_code = product_data.get('codigo', '')
 
             # 🔥 Usar información cacheada de KITs
-            product_info = self.models.execute_kw(
+            product_info = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.product', 'read',
                 [[product_id]],
@@ -1022,7 +1022,7 @@ class OdooConnector:
             logger.info(f"📦 Actualizando stock cacheado: {product_code} - {stock_quantity} unidades")
 
             # Buscar si ya existe registro de inventario (sin buscar location)
-            existing_quants = self.models.execute_kw(
+            existing_quants = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.quant', 'search_read',
                 [[['product_id', '=', product_id], ['location_id', '=', location_id]]],
@@ -1032,7 +1032,7 @@ class OdooConnector:
             if existing_quants:
                 # Actualizar cantidad existente
                 quant_id = existing_quants[0]['id']
-                self.models.execute_kw(
+                self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.quant', 'write',
                     [[quant_id], {'quantity': stock_quantity}]
@@ -1040,7 +1040,7 @@ class OdooConnector:
                 logger.info(f"📦 Stock cacheado actualizado: {product_code} - {stock_quantity} unidades")
             else:
                 # Crear nuevo registro de inventario
-                self.models.execute_kw(
+                self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.quant', 'create',
                     [{
@@ -1065,7 +1065,7 @@ class OdooConnector:
             precio_costo = product_data.get('precioCosto', 0)
 
             # Obtener template_id
-            product_info = self.models.execute_kw(
+            product_info = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.product', 'read',
                 [[product_id]],
@@ -1078,7 +1078,7 @@ class OdooConnector:
             template_id = product_info[0]['product_tmpl_id'][0]
 
             # Buscar info de proveedor existente para este producto
-            existing_seller = self.models.execute_kw(
+            existing_seller = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.supplierinfo', 'search_read',
                 [[['product_tmpl_id', '=', template_id], ['partner_id', '=', supplier_id]]],
@@ -1089,7 +1089,7 @@ class OdooConnector:
                 # Actualizar precio si es diferente
                 seller_id = existing_seller[0]['id']
                 if float(existing_seller[0]['price']) != float(precio_costo):
-                    self.models.execute_kw(
+                    self.execute_kw(
                         self.db, self.uid, self.password,
                         'product.supplierinfo', 'write',
                         [[seller_id], {'price': float(precio_costo)}]
@@ -1099,7 +1099,7 @@ class OdooConnector:
                     logger.info(f"💰 Precio de compra sin cambios: {product_code} - ${precio_costo}")
             else:
                 # Crear nueva información de proveedor
-                self.models.execute_kw(
+                self.execute_kw(
                     self.db, self.uid, self.password,
                     'product.supplierinfo', 'create',
                     [{
@@ -1136,7 +1136,7 @@ class OdooConnector:
                 logger.info(f"📈 Valores anteriores: Min={old_min}, Max={old_max}")
                 logger.info(f"📈 Nuevos valores: Min=-35, Max=-34")
 
-                update_result = self.models.execute_kw(
+                update_result = self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.warehouse.orderpoint', 'write',
                     [[rule_id], {
@@ -1165,7 +1165,7 @@ class OdooConnector:
                     'name': f"Rule {product_code} - VLANTE"
                 }
 
-                rule_id = self.models.execute_kw(
+                rule_id = self.execute_kw(
                     self.db, self.uid, self.password,
                     'stock.warehouse.orderpoint', 'create',
                     [new_rule_data]
@@ -1192,7 +1192,7 @@ class OdooConnector:
             if not self.models or not product_ids:
                 return {}
 
-            quants = self.models.execute_kw(
+            quants = self.execute_kw(
                 self.db, self.uid, self.password,
                 'stock.quant', 'search_read',
                 [[['product_id', 'in', product_ids], ['location_id', '=', location_id]]],
@@ -1292,7 +1292,7 @@ class OdooConnector:
                 logger.info(f"🔄 Actualizando {len(quants_to_update)} quants existentes en batch...")
                 for quant_id, quantity, code in quants_to_update:
                     try:
-                        self.models.execute_kw(
+                        self.execute_kw(
                             self.db, self.uid, self.password,
                             'stock.quant', 'write',
                             [[quant_id], {'quantity': quantity}]
@@ -1315,7 +1315,7 @@ class OdooConnector:
 
                 try:
                     # Crear todos los quants en una sola llamada
-                    created_ids = self.models.execute_kw(
+                    created_ids = self.execute_kw(
                         self.db, self.uid, self.password,
                         'stock.quant', 'create',
                         [quant_records]
@@ -1327,7 +1327,7 @@ class OdooConnector:
                     # Fallback: crear individualmente
                     for product_id, quantity, code in quants_to_create:
                         try:
-                            self.models.execute_kw(
+                            self.execute_kw(
                                 self.db, self.uid, self.password,
                                 'stock.quant', 'create',
                                 [{
@@ -1355,7 +1355,7 @@ class OdooConnector:
             if not self.models or not template_ids:
                 return {}
 
-            sellers = self.models.execute_kw(
+            sellers = self.execute_kw(
                 self.db, self.uid, self.password,
                 'product.supplierinfo', 'search_read',
                 [[['product_tmpl_id', 'in', template_ids], ['partner_id', '=', supplier_id]]],
@@ -1446,7 +1446,7 @@ class OdooConnector:
                     ids_to_update = [item[0] for item in items]
                     codes = [item[1] for item in items]
                     try:
-                        self.models.execute_kw(
+                        self.execute_kw(
                             self.db, self.uid, self.password,
                             'product.supplierinfo', 'write',
                             [ids_to_update, {'price': price}]
@@ -1471,7 +1471,7 @@ class OdooConnector:
 
                 try:
                     # Crear todos los sellers en una sola llamada
-                    created_ids = self.models.execute_kw(
+                    created_ids = self.execute_kw(
                         self.db, self.uid, self.password,
                         'product.supplierinfo', 'create',
                         [seller_records]
@@ -1483,7 +1483,7 @@ class OdooConnector:
                     # Fallback: crear individualmente
                     for template_id, price, code, product_code, product_name in sellers_to_create:
                         try:
-                            self.models.execute_kw(
+                            self.execute_kw(
                                 self.db, self.uid, self.password,
                                 'product.supplierinfo', 'create',
                                 [{
@@ -1554,7 +1554,7 @@ class OdooConnector:
 
                 try:
                     # Actualizar todas las reglas con los mismos valores en batch
-                    self.models.execute_kw(
+                    self.execute_kw(
                         self.db, self.uid, self.password,
                         'stock.warehouse.orderpoint', 'write',
                         [rule_ids, {
@@ -1569,7 +1569,7 @@ class OdooConnector:
                     # Fallback: actualizar individualmente
                     for rule_id, code in rules_to_update:
                         try:
-                            self.models.execute_kw(
+                            self.execute_kw(
                                 self.db, self.uid, self.password,
                                 'stock.warehouse.orderpoint', 'write',
                                 [[rule_id], {
@@ -1598,7 +1598,7 @@ class OdooConnector:
 
                 try:
                     # Crear todas las reglas en una sola llamada
-                    created_ids = self.models.execute_kw(
+                    created_ids = self.execute_kw(
                         self.db, self.uid, self.password,
                         'stock.warehouse.orderpoint', 'create',
                         [rule_records]
@@ -1610,7 +1610,7 @@ class OdooConnector:
                     # Fallback: crear individualmente
                     for template_id, product_id, code, product_code in rules_to_create:
                         try:
-                            self.models.execute_kw(
+                            self.execute_kw(
                                 self.db, self.uid, self.password,
                                 'stock.warehouse.orderpoint', 'create',
                                 [{
