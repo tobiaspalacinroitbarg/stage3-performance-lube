@@ -366,27 +366,54 @@ class SVScraperV2:
         
         for i in range(0, len(product_ids_list), batch_size):
             batch = product_ids_list[i:i + batch_size]
-            try:
-                products = self.odoo_connector.models.execute_kw(
-                    self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
-                    'product.product', 'read',
-                    [batch],
-                    {'fields': ['id', 'default_code', 'product_tmpl_id', 'type']}
-                )
-                
-                for p in products:
-                    code = p.get('default_code')
-                    if code and str(code).strip():
-                        code = str(code).strip()
-                        product_type = p.get('type', '')
-                        # Solo 'product' (storable) puede tener quants, no 'consu' ni 'service'
-                        product_codes[code] = {
-                            'product_id': p['id'],
-                            'template_id': p['product_tmpl_id'][0] if p.get('product_tmpl_id') else None,
-                            'is_storable': product_type == 'product',
-                        }
-            except Exception as e:
-                logger.error(f"Error leyendo batch: {e}")
+            batch_num = i // batch_size + 1
+            total_batches = (len(product_ids_list) + batch_size - 1) // batch_size
+            
+            # Retry logic with exponential backoff
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    products = self.odoo_connector.models.execute_kw(
+                        self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
+                        'product.product', 'read',
+                        [batch],
+                        {'fields': ['id', 'default_code', 'product_tmpl_id', 'type']}
+                    )
+                    
+                    for p in products:
+                        code = p.get('default_code')
+                        if code and str(code).strip():
+                            code = str(code).strip()
+                            product_type = p.get('type', '')
+                            # Solo 'product' (storable) puede tener quants, no 'consu' ni 'service'
+                            product_codes[code] = {
+                                'product_id': p['id'],
+                                'template_id': p['product_tmpl_id'][0] if p.get('product_tmpl_id') else None,
+                                'is_storable': product_type == 'product',
+                            }
+                    
+                    if batch_num % 5 == 0:
+                        logger.info(f"   📦 Batch {batch_num}/{total_batches} completado ({len(product_codes)} códigos)")
+                    
+                    # Small delay between batches to avoid rate limiting
+                    time.sleep(0.3)
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    is_rate_limit = '429' in error_str or 'too many' in error_str or 'rate' in error_str
+                    
+                    if attempt < max_retries - 1:
+                        # Exponential backoff: 2, 4, 8, 16 seconds
+                        wait_time = 2 ** (attempt + 1)
+                        if is_rate_limit:
+                            wait_time = wait_time * 2  # Double wait time for rate limits
+                            logger.warning(f"⚠️ Rate limit en batch {batch_num}, esperando {wait_time}s (intento {attempt + 1}/{max_retries})")
+                        else:
+                            logger.warning(f"⚠️ Error en batch {batch_num}: {e}, reintentando en {wait_time}s (intento {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ Error leyendo batch {batch_num} después de {max_retries} intentos: {e}")
         
         logger.info(f"✅ {len(product_codes)} productos con código válido")
         return product_codes
