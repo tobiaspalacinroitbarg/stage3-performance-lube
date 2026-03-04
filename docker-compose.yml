@@ -37,8 +37,8 @@ services:
         echo \"$$SCRAPER_SCHEDULE cd /app && python main.py >> /app/logs/pr-scraper.log 2>&1\" > /etc/cron.d/scraper &&
         chmod 0644 /etc/cron.d/scraper &&
         crontab /etc/cron.d/scraper &&
-        echo 'Cron configurado. Ejecutando primera corrida (no bloqueante)...' &&
-        python main.py >> /app/logs/pr-scraper.log 2>&1 || echo 'Primera corrida falló, el cron reintentará' &&
+        echo 'Cron configurado. Ejecutando primera corrida...' &&
+        python main.py || echo 'Primera corrida falló, el cron reintentará' &&
         echo 'Iniciando cron daemon...' &&
         cron -f
       "
@@ -81,8 +81,8 @@ services:
         echo \"$$SCRAPER_SCHEDULE cd /app && python sv_scraper_v2.py >> /app/logs/sv-scraper.log 2>&1\" > /etc/cron.d/scraper &&
         chmod 0644 /etc/cron.d/scraper &&
         crontab /etc/cron.d/scraper &&
-        echo 'Cron configurado. Ejecutando primera corrida (no bloqueante)...' &&
-        python sv_scraper_v2.py >> /app/logs/sv-scraper.log 2>&1 || echo 'Primera corrida falló, el cron reintentará' &&
+        echo 'Cron configurado. Ejecutando primera corrida...' &&
+        python sv_scraper_v2.py || echo 'Primera corrida falló, el cron reintentará' &&
         echo 'Iniciando cron daemon...' &&
         cron -f
       "
