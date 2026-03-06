@@ -2,19 +2,67 @@
 # Docker Compose - Scrapers PR y SV
 # =============================================================================
 # 
-# Uso:
-#   docker-compose up -d              # Levantar ambos con cron
-#   docker-compose up pr-scraper -d   # Solo PR
-#   docker-compose up sv-scraper -d   # Solo SV
+# USO RECOMENDADO (todos los scrapers en serie):
+#   docker-compose up scrapers -d                    # Cron cada 4 horas
+#   docker-compose run --rm scrapers-manual          # Ejecutar ahora
 #
-#   docker-compose run --rm pr-scraper-manual   # Ejecutar PR manualmente
-#   docker-compose run --rm sv-scraper-manual   # Ejecutar SV manualmente
+# Servicios individuales (NO recomendado, puede causar rate limiting):
+#   docker-compose up pr-scraper -d
+#   docker-compose up sv-scraper -d
 #
 # =============================================================================
 
 version: '3.8'
 
 services:
+  # ===========================================================================
+  # SCRAPERS - Todos los scrapers en serie (RECOMENDADO)
+  # ===========================================================================
+  # Ejecuta PR -> SV -> MinMax en secuencia para evitar rate limiting de Odoo
+  scrapers:
+    build: .
+    container_name: scrapers
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+      - SCRAPERS_SCHEDULE=${SCRAPERS_SCHEDULE:-0 */4 * * *}
+    command: >
+      bash -c "
+        echo 'Scrapers - Cron: $$SCRAPERS_SCHEDULE (cada 4 horas)' &&
+        echo \"$$SCRAPERS_SCHEDULE cd /app && python scripts/run_all_scrapers.py >> /app/logs/scrapers.log 2>&1\" > /etc/cron.d/scrapers &&
+        chmod 0644 /etc/cron.d/scrapers &&
+        crontab /etc/cron.d/scrapers &&
+        echo 'Ejecutando primera corrida...' &&
+        python scripts/run_all_scrapers.py || echo 'Primera corrida falló, el cron reintentará' &&
+        echo 'Iniciando cron daemon...' &&
+        cron -f
+      "
+    restart: unless-stopped
+
+  # Ejecución manual de todos los scrapers
+  scrapers-manual:
+    build: .
+    container_name: scrapers-manual
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+      - TZ=America/Argentina/Buenos_Aires
+    command: python scripts/run_all_scrapers.py
+    profiles: ["manual"]
+
+  # ===========================================================================
+  # SERVICIOS INDIVIDUALES (usar solo si sabés lo que hacés)
+  # ===========================================================================
+
   # ===========================================================================
   # PR SCRAPER - PR Autopartes
   # ===========================================================================
