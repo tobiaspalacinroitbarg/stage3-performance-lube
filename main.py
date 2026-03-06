@@ -133,8 +133,8 @@ class OdooConnector:
         self.uid = None
         self.models = None
         # Configuración de reintentos para manejar rate limiting
-        self.max_retries = 5
-        self.initial_retry_delay = 2.0  # segundos
+        self.max_retries = 10
+        self.initial_retry_delay = 3.0  # segundos (backoff: 3, 6, 12, 24, 48...)
 
     def _execute_with_retry(self, func, *args, **kwargs):
         """Ejecutar función de Odoo con reintentos y backoff exponencial"""
@@ -176,7 +176,10 @@ class OdooConnector:
         def _do_execute():
             return self.models.execute_kw(db, uid, password, model, method, domain, kwargs_dict)
 
-        return self._execute_with_retry(_do_execute)
+        result = self._execute_with_retry(_do_execute)
+        # Pequeño delay después de cada llamada exitosa para evitar rate limiting
+        time.sleep(0.2)
+        return result
 
     def connect(self) -> bool:
         """Establecer conexión con Odoo"""

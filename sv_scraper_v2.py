@@ -57,8 +57,8 @@ class SVConfigV2:
     scraping_location_name: str = "SV - Scraping"
 
     # Rendimiento
-    request_delay: float = float(os.getenv("SV_REQUEST_DELAY", "0.05"))
-    max_workers: int = int(os.getenv("SV_MAX_WORKERS", "5"))  # Reducido para estabilidad
+    request_delay: float = float(os.getenv("SV_REQUEST_DELAY", "0.1"))
+    max_workers: int = int(os.getenv("SV_MAX_WORKERS", "1"))  # Serial por defecto para evitar rate limiting
 
     def __post_init__(self):
         if not self.sv_username or not self.sv_password:
