@@ -6,7 +6,7 @@ Fórmula:
 - product_max_qty = ceil(warehouse_rotation) * 2
 
 Características:
-- URL hardcodeada a producción (pldistribucion.adhoc.ar)
+- Usa variables de entorno ODOO_URL y ODOO_DB
 - Agrupa updates por (min, max) para minimizar requests
 - Delay entre requests para evitar rate limiting
 - Retry con backoff en caso de 429
@@ -38,13 +38,12 @@ def parse_args():
 
 
 def connect_odoo():
-    """Conectar a Odoo producción"""
+    """Conectar a Odoo usando variables de entorno"""
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(os.path.join(project_root, '.env'))
 
-    # URL hardcodeada a producción
-    url = "https://pldistribucion.adhoc.ar"
-    db = "odoo"
+    url = os.getenv('ODOO_URL', 'https://pldistribucion.adhoc.ar').rstrip('/')
+    db = os.getenv('ODOO_DB', 'odoo')
     username = os.getenv('ODOO_USER')
     password = os.getenv('ODOO_PASSWORD')
 

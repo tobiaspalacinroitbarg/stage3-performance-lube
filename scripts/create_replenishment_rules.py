@@ -49,14 +49,13 @@ def parse_args():
 
 
 def connect_odoo():
-    """Conectar a Odoo y retornar (models, uid, db, password)"""
+    """Conectar a Odoo usando variables de entorno"""
     # Cargar .env desde la raíz del proyecto
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(os.path.join(project_root, '.env'))
 
-    # URL hardcodeada a producción, credenciales desde .env
-    url = "https://pldistribucion.adhoc.ar"
-    db = "odoo"
+    url = os.getenv('ODOO_URL', 'https://pldistribucion.adhoc.ar').rstrip('/')
+    db = os.getenv('ODOO_DB', 'odoo')
     username = os.getenv('ODOO_USER')
     password = os.getenv('ODOO_PASSWORD')
 
