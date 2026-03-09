@@ -1,24 +1,17 @@
 # =============================================================================
-# Docker Compose - Scrapers PR y SV
+# Docker Compose - Scrapers Performance Lube
 # =============================================================================
-# 
-# USO RECOMENDADO (todos los scrapers en serie):
-#   docker-compose up scrapers -d                    # Cron cada 4 horas
-#   docker-compose run --rm scrapers-manual          # Ejecutar ahora
 #
-# Servicios individuales (NO recomendado, puede causar rate limiting):
-#   docker-compose up pr-scraper -d
-#   docker-compose up sv-scraper -d
+# USO:
+#   docker-compose up scrapers          # Corre todo una vez (PR -> SV -> MinMax)
+#   docker-compose up scrapers-cron -d  # Cron cada 4 horas
 #
 # =============================================================================
-
-version: '3.8'
 
 services:
   # ===========================================================================
-  # SCRAPERS - Todos los scrapers en serie (RECOMENDADO)
+  # SCRAPERS - Todos en serie (RECOMENDADO)
   # ===========================================================================
-  # Ejecuta PR -> SV -> MinMax en secuencia para evitar rate limiting de Odoo
   scrapers:
     build: .
     container_name: scrapers
@@ -30,24 +23,41 @@ services:
     environment:
       - HEADLESS=true
       - TZ=America/Argentina/Buenos_Aires
-      - SCRAPERS_SCHEDULE=${SCRAPERS_SCHEDULE:-0 */4 * * *}
     command: >
       bash -c "
-        echo 'Scrapers - Cron: $$SCRAPERS_SCHEDULE (cada 4 horas)' &&
-        echo \"$$SCRAPERS_SCHEDULE cd /app && python scripts/run_all_scrapers.py >> /app/logs/scrapers.log 2>&1\" > /etc/cron.d/scrapers &&
-        chmod 0644 /etc/cron.d/scrapers &&
-        crontab /etc/cron.d/scrapers &&
-        echo 'Ejecutando primera corrida...' &&
-        python scripts/run_all_scrapers.py || echo 'Primera corrida falló, el cron reintentará' &&
-        echo 'Iniciando cron daemon...' &&
-        cron -f
+        echo '========================================' &&
+        echo 'SCRAPERS - Ejecucion secuencial' &&
+        echo '========================================' &&
+        echo '' &&
+        echo '[1/3] PR Scraper - PR Autopartes' &&
+        echo '----------------------------------------' &&
+        python main.py --once &&
+        echo '' &&
+        echo 'Esperando 60s antes del siguiente...' &&
+        sleep 60 &&
+        echo '' &&
+        echo '[2/3] SV Scraper - Servicios Viales' &&
+        echo '----------------------------------------' &&
+        python sv_scraper_v2.py &&
+        echo '' &&
+        echo 'Esperando 60s antes del siguiente...' &&
+        sleep 60 &&
+        echo '' &&
+        echo '[3/3] Replenishment Min/Max' &&
+        echo '----------------------------------------' &&
+        python scripts/update_replenishment_minmax.py &&
+        echo '' &&
+        echo '========================================' &&
+        echo 'COMPLETADO - Todos los scrapers OK' &&
+        echo '========================================'
       "
-    restart: unless-stopped
 
-  # Ejecución manual de todos los scrapers
-  scrapers-manual:
+  # ===========================================================================
+  # SCRAPERS CON CRON - Cada 4 horas
+  # ===========================================================================
+  scrapers-cron:
     build: .
-    container_name: scrapers-manual
+    container_name: scrapers-cron
     env_file:
       - .env
     volumes:
@@ -56,15 +66,20 @@ services:
     environment:
       - HEADLESS=true
       - TZ=America/Argentina/Buenos_Aires
-    command: python scripts/run_all_scrapers.py
-    profiles: ["manual"]
+      - SCRAPERS_SCHEDULE=${SCRAPERS_SCHEDULE:-0 */4 * * *}
+    command: >
+      bash -c "
+        echo 'Scrapers Cron - Schedule: $$SCRAPERS_SCHEDULE' &&
+        echo \"$$SCRAPERS_SCHEDULE cd /app && python main.py --once && sleep 60 && python sv_scraper_v2.py && sleep 60 && python scripts/update_replenishment_minmax.py >> /app/logs/scrapers.log 2>&1\" > /etc/cron.d/scrapers &&
+        chmod 0644 /etc/cron.d/scrapers &&
+        crontab /etc/cron.d/scrapers &&
+        echo 'Cron configurado. Iniciando daemon...' &&
+        cron -f
+      "
+    restart: unless-stopped
 
   # ===========================================================================
-  # SERVICIOS INDIVIDUALES (usar solo si sabés lo que hacés)
-  # ===========================================================================
-
-  # ===========================================================================
-  # PR SCRAPER - PR Autopartes
+  # SERVICIOS INDIVIDUALES (para debug)
   # ===========================================================================
   pr-scraper:
     build: .
@@ -77,39 +92,9 @@ services:
     environment:
       - HEADLESS=true
       - TZ=America/Argentina/Buenos_Aires
-      - SCRAPER_NAME=PR
-      - SCRAPER_SCHEDULE=${PR_SCHEDULE:-0 */2 * * *}
-    command: >
-      bash -c "
-        echo 'PR Scraper - Iniciando con cron: $$SCRAPER_SCHEDULE' &&
-        echo \"$$SCRAPER_SCHEDULE cd /app && python main.py >> /app/logs/pr-scraper.log 2>&1\" > /etc/cron.d/scraper &&
-        chmod 0644 /etc/cron.d/scraper &&
-        crontab /etc/cron.d/scraper &&
-        echo 'Cron configurado. Ejecutando primera corrida...' &&
-        python main.py || echo 'Primera corrida falló, el cron reintentará' &&
-        echo 'Iniciando cron daemon...' &&
-        cron -f
-      "
-    restart: unless-stopped
+    command: python main.py --once
+    profiles: ["individual"]
 
-  # PR Scraper - Ejecución manual (one-shot)
-  pr-scraper-manual:
-    build: .
-    container_name: pr-scraper-manual
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - HEADLESS=true
-      - TZ=America/Argentina/Buenos_Aires
-    command: python main.py
-    profiles: ["manual"]
-
-  # ===========================================================================
-  # SV SCRAPER - Servicios Viales
-  # ===========================================================================
   sv-scraper:
     build: .
     container_name: sv-scraper
@@ -121,94 +106,9 @@ services:
     environment:
       - HEADLESS=true
       - TZ=America/Argentina/Buenos_Aires
-      - SCRAPER_NAME=SV
-      - SCRAPER_SCHEDULE=${SV_SCHEDULE:-0 */4 * * *}
-    command: >
-      bash -c "
-        echo 'SV Scraper - Iniciando con cron: $$SCRAPER_SCHEDULE' &&
-        echo \"$$SCRAPER_SCHEDULE cd /app && python sv_scraper_v2.py >> /app/logs/sv-scraper.log 2>&1\" > /etc/cron.d/scraper &&
-        chmod 0644 /etc/cron.d/scraper &&
-        crontab /etc/cron.d/scraper &&
-        echo 'Cron configurado. Ejecutando primera corrida...' &&
-        python sv_scraper_v2.py || echo 'Primera corrida falló, el cron reintentará' &&
-        echo 'Iniciando cron daemon...' &&
-        cron -f
-      "
-    restart: unless-stopped
-
-  # SV Scraper - Ejecución manual (one-shot)
-  sv-scraper-manual:
-    build: .
-    container_name: sv-scraper-manual
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - HEADLESS=true
-      - TZ=America/Argentina/Buenos_Aires
     command: python sv_scraper_v2.py
-    profiles: ["manual"]
+    profiles: ["individual"]
 
-  # ===========================================================================
-  # SV SCRAPER DRY-RUN - Para testing
-  # ===========================================================================
-  sv-scraper-dry:
-    build: .
-    container_name: sv-scraper-dry
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - HEADLESS=true
-      - TZ=America/Argentina/Buenos_Aires
-    command: python sv_scraper_v2.py --dry-run
-    profiles: ["test"]
-
-  # ===========================================================================
-  # REPLENISHMENT RULES - Crear reglas de reabastecimiento (producción)
-  # ===========================================================================
-  # Uso:
-  #   docker-compose run --rm replenishment-dry      # Preview
-  #   docker-compose run --rm replenishment          # Ejecutar
-  
-  replenishment:
-    build: .
-    container_name: replenishment
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - TZ=America/Argentina/Buenos_Aires
-    command: python scripts/create_replenishment_rules.py
-    profiles: ["manual"]
-
-  replenishment-dry:
-    build: .
-    container_name: replenishment-dry
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - TZ=America/Argentina/Buenos_Aires
-    command: python scripts/create_replenishment_rules.py --dry-run
-    profiles: ["manual"]
-
-  # ===========================================================================
-  # REPLENISHMENT MIN/MAX - Actualizar min/max basado en rotación (producción)
-  # ===========================================================================
-  # Fórmula: min = ceil(rotation), max = ceil(rotation) * 2
-  # Uso:
-  #   docker-compose run --rm replenishment-minmax-dry   # Preview
-  #   docker-compose run --rm replenishment-minmax       # Ejecutar
-  
   replenishment-minmax:
     build: .
     container_name: replenishment-minmax
@@ -219,42 +119,5 @@ services:
       - ./logs:/app/logs
     environment:
       - TZ=America/Argentina/Buenos_Aires
-      - MINMAX_SCHEDULE=${MINMAX_SCHEDULE:-0 6 * * *}
-    command: >
-      bash -c "
-        echo 'Replenishment Min/Max - Cron: $$MINMAX_SCHEDULE (6 AM Argentina)' &&
-        echo \"$$MINMAX_SCHEDULE cd /app && python scripts/update_replenishment_minmax.py >> /app/logs/replenishment-minmax.log 2>&1\" > /etc/cron.d/minmax &&
-        chmod 0644 /etc/cron.d/minmax &&
-        crontab /etc/cron.d/minmax &&
-        echo 'Ejecutando primera corrida...' &&
-        python scripts/update_replenishment_minmax.py &&
-        echo 'Primera corrida completada. Iniciando cron daemon...' &&
-        cron -f
-      "
-    restart: unless-stopped
-
-  replenishment-minmax-manual:
-    build: .
-    container_name: replenishment-minmax-manual
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - TZ=America/Argentina/Buenos_Aires
     command: python scripts/update_replenishment_minmax.py
-    profiles: ["manual"]
-
-  replenishment-minmax-dry:
-    build: .
-    container_name: replenishment-minmax-dry
-    env_file:
-      - .env
-    volumes:
-      - ./output:/app/output
-      - ./logs:/app/logs
-    environment:
-      - TZ=America/Argentina/Buenos_Aires
-    command: python scripts/update_replenishment_minmax.py --dry-run
-    profiles: ["manual"]
+    profiles: ["individual"]
