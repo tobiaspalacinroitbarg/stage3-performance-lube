@@ -387,19 +387,18 @@ class SVScraperV2:
                         self.odoo_connector.db, self.odoo_connector.uid, self.odoo_connector.password,
                         'product.product', 'read',
                         [batch],
-                        {'fields': ['id', 'default_code', 'product_tmpl_id', 'type']}
+                        {'fields': ['id', 'default_code', 'product_tmpl_id', 'is_storable']}
                     )
                     
                     for p in products:
                         code = p.get('default_code')
                         if code and str(code).strip():
                             code = str(code).strip()
-                            product_type = p.get('type', '')
-                            # Solo 'product' (storable) puede tener quants, no 'consu' ni 'service'
+                            # Usar campo is_storable directo de Odoo (booleano)
                             product_codes[code] = {
                                 'product_id': p['id'],
                                 'template_id': p['product_tmpl_id'][0] if p.get('product_tmpl_id') else None,
-                                'is_storable': product_type == 'product',
+                                'is_storable': p.get('is_storable', False),
                             }
                     
                     if batch_num % 5 == 0:
