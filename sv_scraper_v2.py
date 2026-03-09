@@ -252,15 +252,14 @@ class SVScraperV2:
                         logger.debug(f"Match sin espacios: {code} -> {api_code}")
                         return product
                 
-                # 3rd try: códigos que empiezan con T pueden tener "i" al final (TBH8320 == TBH8320i)
-                if code_upper.startswith("T"):
-                    for product in results:
-                        api_code = product.get("codigo", "").strip().upper()
-                        api_code_no_spaces = api_code.replace(" ", "")
-                        # Verificar si api_code es code + "I" al final
-                        if api_code_no_spaces == code_no_spaces + "I":
-                            logger.debug(f"Match con sufijo 'i': {code} -> {api_code}")
-                            return product
+                # 3rd try: códigos con sufijo "i" al final (TBH8320 == TBH8320i, TR1145 == TR1145i)
+                for product in results:
+                    api_code = product.get("codigo", "").strip().upper()
+                    api_code_no_spaces = api_code.replace(" ", "")
+                    # Verificar si api_code es code + "I" al final
+                    if api_code_no_spaces == code_no_spaces + "I":
+                        logger.debug(f"Match con sufijo 'i': {code} -> {product.get('codigo')}")
+                        return product
                 
                 # No hubo match exacto
                 if len(results) > 0:
