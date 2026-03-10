@@ -49,8 +49,7 @@ for picking_in in records:
                 break
         
         if not es_proveedor_scraper:
-            if DEBUG_MODE:
-                picking_in.message_post(body=f"ℹ️ Proveedor '{proveedor_nombre}' no es de scraping. Script no aplica.")
+            # Silencioso: no dejamos mensaje si no es proveedor de scraping
             continue
             
         if DEBUG_MODE:
