@@ -175,6 +175,4 @@ for picking_in in records:
                 picking_in.message_post(body=f"🏁 No se encontraron líneas en ubicaciones de scraping dentro del pedido de salida {picking_out.name}.")
 
     except Exception as e:
-        import traceback
-        error_detail = traceback.format_exc()
-        picking_in.message_post(body=f"🔥 <b>ERROR CRÍTICO:</b> {str(e)}<br/><pre>{error_detail}</pre>")
+        picking_in.message_post(body=f"🔥 <b>ERROR CRÍTICO:</b> {str(e)}")

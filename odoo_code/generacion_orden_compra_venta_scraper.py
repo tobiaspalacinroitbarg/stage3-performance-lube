@@ -101,7 +101,7 @@ for picking in records:
                 po = env['purchase.order'].create({
                     'partner_id': partner.id,
                     'origin': picking.name, # Enlace clave con el Picking
-                    'date_order': datetime.datetime.now(),
+                    'date_order': fields.Datetime.now(),
                     'company_id': picking.company_id.id,
                 })
                 
@@ -112,7 +112,7 @@ for picking in records:
                         'product_id': product.id,
                         'product_qty': cantidad,
                         'price_unit': product.standard_price, 
-                        'date_planned': datetime.datetime.now(),
+                        'date_planned': fields.Datetime.now(),
                         'name': product.name,
                         'product_uom': product.uom_id.id,
                     })

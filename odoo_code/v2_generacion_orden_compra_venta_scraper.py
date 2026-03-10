@@ -130,7 +130,7 @@ for picking in records:
                 po = env['purchase.order'].create({
                     'partner_id': partner.id,
                     'origin': f"{picking.name}",
-                    'date_order': datetime.datetime.now(),
+                    'date_order': fields.Datetime.now(),
                     'company_id': picking.company_id.id,
                 })
                 
@@ -147,7 +147,7 @@ for picking in records:
                         'product_id': product.id,
                         'product_qty': cantidad,
                         'price_unit': precio,
-                        'date_planned': datetime.datetime.now(),
+                        'date_planned': fields.Datetime.now(),
                         'name': product.name,
                         'product_uom': product.uom_id.id,
                     })
@@ -186,6 +186,4 @@ for picking in records:
                 picking.message_post(body="🏁 Finalizado sin crear PO (No se detectaron items de scraper válidos o proveedores).")
                 
     except Exception as e:
-        import traceback
-        error_detail = traceback.format_exc()
-        picking.message_post(body=f"🔥 <b>ERROR FATAL EN SCRIPT:</b> {str(e)}<br/><pre>{error_detail}</pre>")
+        picking.message_post(body=f"🔥 <b>ERROR FATAL EN SCRIPT:</b> {str(e)}")
