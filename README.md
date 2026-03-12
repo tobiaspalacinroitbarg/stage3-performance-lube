@@ -1,613 +1,499 @@
-# PrAutoParte Scraper - Sistema Profesional de Scraping
+# Performance Lube - Sistema de Scrapers Multi-Proveedor
 
-Scraper profesional para extraer datos de productos desde [PrAutoParte](https://www.prautopartes.com.ar/) con soporte completo para deployment en producción con PM2, Docker e integración con Odoo.
+Sistema automatizado de sincronización de stock desde múltiples proveedores a Odoo.
 
-## Características Principales
+---
 
-### 🔥 Scraping Profesional
-- ✅ Scraping automatizado con Selenium y requests
-- ✅ Manejo robusto de errores y reintentos
-- ✅ Logging detallado con rotación de archivos
-- ✅ Configuración por variables de entorno
-- ✅ Gestión automática de ChromeDriver
-- ✅ Exportación a CSV estructurado
+## 📋 Tabla de Contenidos
 
-### 🚀 Deployment Profesional
-- ✅ Soporte para PM2 (process manager)
-- ✅ Configuración Docker completa
-- ✅ Integración automática con Odoo
-- ✅ Scheduling automático cada 4 horas
-- ✅ Monitoreo y reinicio automático
-- ✅ Gestión de memoria y recursos
+- [Scrapers Disponibles](#-scrapers-disponibles)
+- [Configuración Inicial](#%EF%B8%8F-configuración-inicial)
+- [Uso - Ejecución Manual vs Automática](#-uso---ejecución-manual-vs-automática)
+- [Configuración del Schedule (Cron)](#-configuración-del-schedule-cron)
+- [Logs y Monitoreo](#-logs-y-monitoreo)
+- [Troubleshooting](#-troubleshooting)
+- [Estructura del Proyecto](#-estructura-del-proyecto)
 
-### 🌐 Integración Empresarial
-- ✅ API XML-RPC para Odoo
-- ✅ Sincronización automática de productos
-- ✅ Gestión de categorías por marca
-- ✅ Actualización de precios y stock
-- ✅ Manejo de productos duplicados
+---
 
-## Arquitectura del Sistema
+## 🤖 Scrapers Disponibles
 
-```
-prauto-scraper/
-├── main.py                     # Script principal profesionalizado
-├── requirements.txt            # Dependencias de Python
-├── .env.example               # Ejemplo de variables de entorno
-├── .env                      # Variables de entorno de producción
-├── ecosystem.config.js       # Configuración PM2
-├── Dockerfile                # Imagen Docker
-├── docker-compose.yml        # Orquestación Docker
-├── setup_linux.sh            # Script de instalación automática
-├── csv_manager.py            # Gestión de archivos CSV
-├── logs/                     # Directorio de logs (automático)
-├── output/                   # Directorio de salida (automático)
-├── README.md                 # Documentación completa
-└── .gitignore               # Archivos a ignorar
-```
+| Scraper | Proveedor | Ubicación Odoo | Frecuencia Recomendada | Tiempo Estimado |
+|---------|-----------|----------------|------------------------|-----------------|
+| **PR Scraper** | PR Autopartes | `TODO/Stock/PR - Scraping` | Cada 4 horas | 20-30 min |
+| **SV Scraper** | Servicios Viales | `TODO/Stock/SV - Scraping` | Cada 4 horas | 60-90 min |
+| **Replenishment Min/Max** | N/A | Todas las reglas | 1 vez al día | 5-10 min |
 
-## 🚀 Guía de Instalación y Deployment
+---
 
-### Paso 1: Instalación del Sistema
+## ⚙️ Configuración Inicial
 
-#### Opción A: Instalación Automatizada (Recomendada)
+### 1. Clonar el repositorio
+
 ```bash
-# Clonar repositorio (si aplica)
-git clone https://github.com/tustage3/stage3-performance-lube.git
+cd ~
+git clone <repo-url> stage3-performance-lube
 cd stage3-performance-lube
-
-# Ejecutar instalación automática
-chmod +x setup_linux.sh
-./setup_linux.sh
 ```
 
-#### Opción B: Instalación Manual Complete
-
-1. **Instalar dependencias del sistema:**
-
-   **Ubuntu/Debian 20.04/22.04:**
-   ```bash
-   sudo apt update && sudo apt upgrade -y
-   sudo apt install -y python3 python3-pip python3-venv python3-dev curl wget gnupg software-properties-common
-   sudo apt install -y chromium-browser chromium-chromedriver xvfb
-   ```
-
-   **CentOS/RHEL 8/9:**
-   ```bash
-   sudo dnf update -y
-   sudo dnf install -y python3 python3-pip python3-devel curl wget which
-   sudo dnf install -y chromium chromedriver xorg-x11-server-Xvfb
-   ```
-
-   **Arch/Manjaro:**
-   ```bash
-   sudo pacman -Syu
-   sudo pacman -S python python-pip python-virtualenv curl wget
-   sudo pacman -S chromium chromedriver xorg-server-xvfb
-   ```
-
-2. **Instalar PM2 (Process Manager):**
-   ```bash
-   # Instalar Node.js y PM2
-   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-   sudo apt install -y nodejs
-   sudo npm install -g pm2
-   ```
-
-3. **Configurar entorno Python:**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-
-4. **Configurar variables de entorno:**
-   ```bash
-   cp .env.example .env
-   nano .env  # Editar con tus credenciales
-   ```
-
-### Paso 2: Configuración de Producción
-
-#### Configuración de Variables de Entorno
-Crear y editar el archivo `.env`:
+### 2. Crear archivo `.env`
 
 ```bash
-# Copiar template
 cp .env.example .env
 nano .env
 ```
 
-Configurar las siguientes variables:
-
-```env
-# ===== CREDENCIALES PRAUTOPARTE =====
-PRAUTO_USERNAME=tu_usuario_prautoparte
-PRAUTO_PASSWORD=tu_contraseña_prautoparte
-
-# ===== CONFIGURACIÓN SCRAPER =====
-HEADLESS=true  # Siempre true en producción
-PYTHONPATH=/home/ubuntu/stage3-performance-lube
-PYTHONUNBUFFERED=1
-
-# ===== CONFIGURACIÓN ODOO =====
-ODOO_URL=http://your-odoo-server.com:8069
-ODOO_DB=your_database_name
-ODOO_USER=your_odoo_user
-ODOO_PASSWORD=your_odoo_password
-SEND_TO_ODOO=true  # true/false para enviar datos a Odoo
-
-# ===== CONFIGURACIÓN AVANZADA =====
-PM2_LOG_DIR=/home/ubuntu/stage3-performance-lube/logs
-OUTPUT_DIR=/home/ubuntu/stage3-performance-lube/output
-```
-
-#### Configuración de Directorios
-```bash
-# Crear directorios necesarios
-mkdir -p logs output
-chmod 755 logs output
-```
-
-### Paso 3: Iniciar el Servicio
-
-#### Opción A: Ejecución Única
-```bash
-# Activar entorno
-source venv/bin/activate
-
-# Ejecutar scraper una vez
-python main.py --once
-```
-
-#### Opción B: PM2 Process Manager (Recomendado)
-```bash
-# Iniciar el proceso con PM2
-pm2 start ecosystem.config.js
-
-# Verificar estado
-pm2 status
-pm2 logs prauto-scraper
-
-# Reiniciar si es necesario
-pm2 restart prauto-scraper
-```
-
-#### Opción C: Docker
-```bash
-# Construir y ejecutar con Docker Compose
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f prauto-scraper
-```
-
-### Paso 4: Configuración de Monitoreo
-
-#### Configuración de Logs Rotativos
-PM2 maneja automáticamente la rotación de logs. Para configurar:
+### 3. Configurar variables obligatorias
 
 ```bash
-# Instalar plugin de rotación de logs
-pm2 install pm2-logrotate
+# ===== ODOO (OBLIGATORIO) =====
+ODOO_URL=https://pldistribucion.adhoc.ar
+ODOO_DB=odoo
+ODOO_USER=tu_email@ejemplo.com
+ODOO_PASSWORD=tu_password
 
-# Configurar rotación diaria
-pm2 set pm2-logrotate:max_size 10M
-pm2 set pm2-logrotate:retain 30
-pm2 set pm2-logrotate:compress true
+# ===== PR AUTOPARTES (OBLIGATORIO) =====
+PRAUTO_USERNAME=tu_usuario
+PRAUTO_PASSWORD=tu_password
+
+# ===== SERVICIOS VIALES (OBLIGATORIO) =====
+SV_USERNAME=tu_email@ejemplo.com
+SV_PASSWORD=tu_password
+
+# ===== PERFORMANCE =====
+SV_MAX_WORKERS=5
+SV_REQUEST_DELAY=0.1
+
+# ===== SCHEDULE (UTC timezone) =====
+# Para 3 AM Argentina (-03), usar 6 AM UTC
+SCRAPERS_SCHEDULE=0 6 * * *
 ```
 
-#### Monitoreo del Sistema
-```bash
-# Ver procesos activos
-pm2 monit
+**⚠️ IMPORTANTE:** El schedule usa **UTC timezone**, no hora Argentina.
 
-# Ver lista de procesos
-pm2 list
+---
 
-# Ver uso de memoria y CPU
-pm2 info prauto-scraper
-```
+## 🚀 Uso - Ejecución Manual vs Automática
 
-## Instalación Local (Windows)
+### 📌 Opción A: Ejecución Manual (Una Vez)
 
-1. **Configurar el entorno:**
-   ```bash
-   python -m venv venv
-   venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+**Cuándo usar:**
+- Primera vez que lo instalás
+- Para testing y debugging
+- Cuando necesitás ejecutar inmediatamente
 
-2. **Configurar variables de entorno:**
-   ```bash
-   copy .env.example .env
-   # Editar .env con tus credenciales
-   ```
-
-3. **Ejecutar el scraper:**
-   ```bash
-   python main.py
-   ```
-
-## Deployment con Docker
-
-### Opción 1: Docker Build Manual
-```bash
-# Construir imagen
-docker build -t prauto-scraper .
-
-# Ejecutar contenedor
-docker run --rm \
-  --env-file .env \
-  -v $(pwd)/output:/app/output \
-  -v $(pwd)/logs:/app/logs \
-  prauto-scraper
-```
-
-### Opción 2: Docker Compose
-```bash
-# Ejecutar una vez
-docker-compose run --rm prauto-scraper
-
-# O ejecutar en background
-docker-compose up -d
-```
-
-### Opción 3: Con Scheduling (Cron)
-```bash
-# Crear archivo de cron
-echo "0 2 * * * cd /app && python main.py" > crontab
-
-# Ejecutar con cron
-docker-compose --profile cron up -d scraper-cron
-```
-
-## ⚙️ Configuración y Variables de Entorno
-
-### Variables de Entorno Esenciales
-
-| Variable | Descripción | Valor Ejemplo | Obligatorio |
-|----------|-------------|---------------|-------------|
-| `PRAUTO_USERNAME` | Usuario para login PrAutoParte | `30-71727423-3` | ✅ |
-| `PRAUTO_PASSWORD` | Contraseña para login PrAutoParte | `10831` | ✅ |
-| `HEADLESS` | Ejecutar Chrome sin GUI | `true` | ❌ |
-| `PYTHONPATH` | Ruta del proyecto | `/home/ubuntu/stage3-performance-lube` | ❌ |
-| `PYTHONUNBUFFERED` | Buffer de Python | `1` | ❌ |
-
-### Variables de Entorno para Odoo
-
-| Variable | Descripción | Valor Ejemplo | Obligatorio |
-|----------|-------------|---------------|-------------|
-| `ODOO_URL` | URL del servidor Odoo | `http://localhost:8069` | ❌ |
-| `ODOO_DB` | Nombre de la base de datos Odoo | `odoo` | ❌ |
-| `ODOO_USER` | Usuario de Odoo | `admin` | ❌ |
-| `ODOO_PASSWORD` | Contraseña de Odoo | `admin` | ❌ |
-| `SEND_TO_ODOO` | Enviar datos a Odoo | `true/false` | ❌ |
-
-### Variables de Entorno de Producción
-
-| Variable | Descripción | Valor Ejemplo | Obligatorio |
-|----------|-------------|---------------|-------------|
-| `PM2_LOG_DIR` | Directorio de logs PM2 | `/home/ubuntu/stage3-performance-lube/logs` | ❌ |
-| `OUTPUT_DIR` | Directorio de salida CSV | `/home/ubuntu/stage3-performance-lube/output` | ❌ |
-| `NODE_ENV` | Entorno de Node.js | `production` | ❌ |
-
-### Ejemplo de .env Completo
-```env
-# ===== CREDENCIALES PRAUTOPARTE =====
-PRAUTO_USERNAME=tu_usuario_prautoparte
-PRAUTO_PASSWORD=tu_contraseña_prautoparte
-
-# ===== CONFIGURACIÓN SCRAPER =====
-HEADLESS=true
-PYTHONPATH=/home/ubuntu/stage3-performance-lube
-PYTHONUNBUFFERED=1
-
-# ===== CONFIGURACIÓN ODOO =====
-ODOO_URL=http://your-odoo-server.com:8069
-ODOO_DB=production_db
-ODOO_USER=api_user
-ODOO_PASSWORD=secure_password
-SEND_TO_ODOO=true
-
-# ===== CONFIGURACIÓN AVANZADA =====
-PM2_LOG_DIR=/home/ubuntu/stage3-performance-lube/logs
-OUTPUT_DIR=/home/ubuntu/stage3-performance-lube/output
-NODE_ENV=production
-```
-
-## Configuración Avanzada
-
-El scraper se puede configurar modificando la clase `ScrapingConfig` en `main.py`:
-
-```python
-@dataclass
-class ScrapingConfig:
-    base_url: str = "https://www.prautopartes.com.ar/"
-    output_file: str = "articulos.csv"
-    page_timeout: int = 10           # Timeout para cargar páginas
-    request_delay: float = 0.5       # Pausa entre peticiones API
-    window_size: str = "1920,1080"   # Tamaño de ventana del browser
-```
-
-## Logs
-
-Los logs se guardan automáticamente en el directorio `logs/` con:
-- Rotación diaria
-- Retención de 7 días
-- Formato estructurado con timestamp
-
-## Archivos de Salida
-
-El scraper guarda los datos en archivos CSV con la fecha del scraping:
-
-```
-articulos_2025-09-20.csv  # Scraping del 20 de septiembre de 2025
-articulos_2025-09-21.csv  # Scraping del 21 de septiembre de 2025
-```
-
-### Gestión de Archivos CSV
-
-Usa el script `csv_manager.py` para gestionar los archivos:
+**Comando:**
 
 ```bash
-# Listar archivos CSV disponibles
-python csv_manager.py list
-
-# Ver información detallada del último CSV
-python csv_manager.py info
-
-# Ver información de un CSV específico
-python csv_manager.py info 2025-09-20
-
-# Comparar dos archivos CSV
-python csv_manager.py compare 2025-09-20 2025-09-21
-
-# Limpiar archivos antiguos (>7 días)
-python csv_manager.py cleanup --days 7
+cd ~/stage3-performance-lube
+docker-compose build --no-cache
+docker-compose up scrapers
 ```
 
-| Campo | Descripción |
-|-------|-------------|
-| `id` | ID único del producto |
-| `codigo` | Código del producto |
-| `marca` | Marca del producto |
-| `descripcion` | Descripción detallada |
-| `precioLista` | Precio de lista |
-| `precioCosto` | Precio de costo |
-| `precioVenta` | Precio de venta |
-| `descuentos` | Descuentos aplicables |
-| `disponibilidad` | Estado de disponibilidad |
-| `origen` | Origen del producto |
-| `fotos` | URLs de fotos (separadas por coma) |
+**Características:**
+- ✅ Ejecuta los 3 scrapers en serie: PR → (60s) → SV → (60s) → MinMax
+- ✅ Ves el output en tiempo real en tu terminal
+- ✅ Termina automáticamente cuando finaliza
+- ✅ Ideal para debugging y verificar que todo funciona
 
-## 🛠️ Administración y Mantenimiento
+**Flujo de ejecución:**
 
-### Comandos PM2 Esenciales
+```
+[1/3] PR Scraper - PR Autopartes
+----------------------------------------
+... (20-30 minutos)
 
-```bash
-# Iniciar y detener
-pm2 start ecosystem.config.js
-pm2 stop prauto-scraper
-pm2 restart prauto-scraper
-pm2 delete prauto-scraper
+Esperando 60s antes del siguiente...
 
-# Monitoreo
-pm2 status
-pm2 monit
-pm2 logs prauto-scraper
-pm2 info prauto-scraper
+[2/3] SV Scraper - Servicios Viales
+----------------------------------------
+... (60-90 minutos)
 
-# Gestión de procesos
-pm2 save              # Guardar procesos actuales
-pm2 resurrect         # Restaurar procesos guardados
-pm2 startup           # Configurar inicio automático
-pm2 unstartup         # Desactivar inicio automático
+Esperando 60s antes del siguiente...
+
+[3/3] Replenishment Min/Max
+----------------------------------------
+... (5-10 minutos)
+
+========================================
+COMPLETADO - Todos los scrapers OK
+========================================
 ```
 
-### Actualización del Sistema
+---
+
+### 📌 Opción B: Ejecución Automática (Cron en Background)
+
+**Cuándo usar:**
+- En producción
+- Cuando querés que corra automáticamente todos los días
+- Para dejar el servidor funcionando sin supervisión
+
+**Comando:**
 
 ```bash
-# Actualizar dependencias Python
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt --upgrade
-
-# Actualizar Chrome y ChromeDriver
-sudo apt update && sudo apt upgrade -y chromium-browser chromium-chromedriver
-
-# Reiniciar servicio PM2
-pm2 restart prauto-scraper
+cd ~/stage3-performance-lube
+docker-compose build --no-cache
+docker-compose up scrapers-cron -d
 ```
 
-### Rotación y Gestión de Logs
+**Características:**
+- ✅ Corre en **background** (detached mode con `-d`)
+- ✅ Se ejecuta según el **schedule configurado** (ver sección siguiente)
+- ✅ Reinicia automáticamente si el container falla (`restart: unless-stopped`)
+- ✅ Logs van a archivo: `logs/scrapers.log`
+- ✅ Queda funcionando 24/7
+
+---
+
+### 🔄 Comandos Útiles para el Cron
 
 ```bash
+# Ver si está corriendo
+docker ps | grep scrapers-cron
+
 # Ver logs en tiempo real
-pm2 logs prauto-scraper --lines 100
+docker-compose logs -f scrapers-cron
 
-# Configurar rotación automática
-pm2 install pm2-logrotate
-pm2 set pm2-logrotate:max_size 10M
-pm2 set pm2-logrotate:retain 30
-pm2 set pm2-logrotate:compress true
+# Ver últimas 100 líneas
+docker-compose logs scrapers-cron --tail 100
 
-# Limpiar logs antiguos manualmente
-find logs/ -name "*.log" -mtime +30 -delete
+# Ver logs del archivo
+tail -f logs/scrapers.log
+
+# Detener
+docker-compose stop scrapers-cron
+
+# Reiniciar
+docker-compose restart scrapers-cron
+
+# Eliminar y recrear (si cambiaste .env)
+docker-compose stop scrapers-cron
+docker-compose rm -f scrapers-cron
+docker-compose up scrapers-cron -d
 ```
 
-### 🚨 Troubleshooting Común
+---
 
-#### Errores de Autenticación PrAutoParte
+## 📅 Configuración del Schedule (Cron)
+
+### ⚠️ IMPORTANTE: Timezone UTC
+
+**El cron usa UTC**, NO hora Argentina. Tenés que hacer la conversión:
+
+| Hora deseada (Argentina -03) | Valor en `.env` | Cron Schedule |
+|-------------------------------|-----------------|---------------|
+| 2:00 AM | `SCRAPERS_SCHEDULE=0 5 * * *` | 5 AM UTC |
+| 3:00 AM | `SCRAPERS_SCHEDULE=0 6 * * *` | 6 AM UTC |
+| 4:00 AM | `SCRAPERS_SCHEDULE=0 7 * * *` | 7 AM UTC |
+| 6:00 AM | `SCRAPERS_SCHEDULE=0 9 * * *` | 9 AM UTC |
+
+### Formato Cron
+
+```
+* * * * *
+│ │ │ │ │
+│ │ │ │ └─── Día de la semana (0-7, 0=Domingo)
+│ │ │ └───── Mes (1-12)
+│ │ └─────── Día del mes (1-31)
+│ └───────── Hora (0-23, en UTC)
+└─────────── Minuto (0-59)
+```
+
+### Ejemplos Comunes
+
 ```bash
-# Error: "Credenciales no encontradas"
-- Verificar archivo .env existe
-- Comprobar PRAUTO_USERNAME y PRAUTO_PASSWORD
-- Probar credenciales manualmente en el sitio web
+# Todos los días a las 3 AM Argentina (6 AM UTC)
+SCRAPERS_SCHEDULE=0 6 * * *
 
-# Error: "Token de autorización no encontrado"
-- Las credenciales pueden ser incorrectas
-- El sitio web puede haber cambiado el login
-- Verificar la estructura de sesión
+# Cada 4 horas
+SCRAPERS_SCHEDULE=0 */4 * * *
+
+# Lunes a viernes a las 6 AM Argentina (9 AM UTC)
+SCRAPERS_SCHEDULE=0 9 * * 1-5
+
+# Dos veces al día: 6 AM y 6 PM Argentina (9 AM y 9 PM UTC)
+SCRAPERS_SCHEDULE=0 9,21 * * *
 ```
 
-#### Problemas con Chrome/ChromeDriver
+### Aplicar Cambios de Schedule
+
 ```bash
-# Error: "ChromeDriver not found"
-- Usar el script setup_linux.sh
-- Verificar instalación: chromium-browser --version
-- Revisar instalación: chromedriver --version
+# 1. Editar .env
+nano .env
 
-# Error: "ChromeDriver cannot be killed"
-- Matar procesos zombie: pkill -f chrome
-- Limpiar procesos: pkill -f chromedriver
-- Reiniciar servicio PM2
+# 2. Rebuild y reiniciar
+cd ~/stage3-performance-lube
+docker-compose stop scrapers-cron
+docker-compose rm -f scrapers-cron
+docker-compose up scrapers-cron -d
 
-# Error de memoria Chrome
-- Configurar límite de memoria en ecosystem.config.js
-- Usar `--disable-dev-shm-usage` en Chrome options
-- Aumentar memoria Docker: --memory="2g"
+# 3. Verificar que se aplicó
+docker exec scrapers-cron crontab -l
 ```
 
-#### Errores de Conexión Odoo
+Debería mostrar:
+```
+0 6 * * * cd /app && python main.py --once && sleep 60 && python sv_scraper_v2.py && sleep 60 && python scripts/update_replenishment_minmax.py >> /app/logs/scrapers.log 2>&1
+```
+
+---
+
+## 📊 Logs y Monitoreo
+
+### Archivos de Log
+
+```
+logs/
+├── scrapers.log         # Logs del cron automático
+├── pr-scraper.log       # Logs individuales (si usás profiles)
+├── sv-scraper.log
+└── replenishment-minmax.log
+```
+
+### Ver Logs en Tiempo Real
+
 ```bash
-# Error: "Falló la autenticación con Odoo"
-- Verificar URL, DB, usuario y contraseña
-- Probar conexión manual: curl http://odoo-server:8069
-- Verificar firewall y puertos
+# Cron automático (dentro del container)
+docker-compose logs -f scrapers-cron
 
-# Error: "Connection refused"
-- Odoo no está corriendo
-- Puerto 8069 bloqueado
-- URL incorrecta en configuración
+# Archivo de log (en el host)
+tail -f logs/scrapers.log
+
+# Últimas 100 líneas
+tail -100 logs/scrapers.log
 ```
 
-#### Errores PM2
+### Buscar Errores
+
 ```bash
-# PM2 no inicia automáticamente
-pm2 startup
-pm2 save
+# Buscar errores en logs
+grep -i error logs/scrapers.log
+grep "❌" logs/scrapers.log
+grep "429" logs/scrapers.log  # Rate limiting
 
-# Proceso consume mucha memoria
-pm2 restart prauto-scraper
-# Ajustar max_memory_restart en ecosystem.config.js
-
-# Logs no rotan
-pm2 install pm2-logrotate
-pm2 restart prauto-scraper
+# Ver resumen de última ejecución
+tail -50 logs/scrapers.log | grep "RESUMEN FINAL" -A 20
 ```
 
-### 🔒 Consideraciones de Seguridad
+### Ejemplo de Output Exitoso
 
-#### Configuración Segura
-- Usar variables de entorno para credenciales
-- No commitear archivo .env
-- Usar HTTPS para Odoo si está disponible
-- Configurar firewall para acceso a puertos
+```
+======================================================================
+RESUMEN FINAL
+======================================================================
 
-#### Permisos de Sistema
+    Productos en Odoo:          2867
+    Productos buscados:         2867
+
+    RESULTADOS SCRAPING:
+    - Con stock (>0):           2260
+    - Encontrados sin stock:    490
+    - No encontrados en API:    117
+    - Total unidades:           300708
+
+    ACTUALIZACION ODOO:
+    - Quants actualizados:      1849
+    - Quants creados:           517
+    - No-storable saltados:     0
+    - Errores:                  0
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### ❌ El cron no está ejecutando
+
+**Síntoma:** No hay logs nuevos, el scraper no corre a la hora configurada.
+
+**Diagnóstico:**
+
 ```bash
-# Permisos recomendados
-chmod 600 .env                    # Solo usuario dueño
-chmod 755 logs output             # Acceso para servidor web
-chmod 700 venv                    # Solo usuario dueño
+# 1. Verificar horario del servidor
+docker exec scrapers-cron date
 
-# Crear usuario dedicado
-sudo useradd -r -s /bin/false scraper
-sudo chown -R scraper:scraper /home/ubuntu/stage3-performance-lube
+# 2. Verificar cron configurado
+docker exec scrapers-cron crontab -l
+
+# 3. Verificar que el daemon está corriendo
+docker exec scrapers-cron ps aux | grep cron
 ```
 
-#### Backup y Recuperación
+**Solución común:** El schedule está en UTC, no en hora Argentina. 
+
+- Si querés 3 AM Argentina, usá `SCRAPERS_SCHEDULE=0 6 * * *` (6 AM UTC)
+- Rebuild el container después de cambiar `.env`
+
+---
+
+### ❌ Error "429 Too Many Requests"
+
+**Síntoma:** Logs muestran errores de rate limiting de Odoo.
+
+**Solución:**
+
+1. El sistema ya tiene retry automático con backoff exponencial (10 intentos)
+2. Si sigue fallando, aumentá los delays en `.env`:
+
 ```bash
-# Backup de configuración
-tar -czf backup_config.tar.gz .env ecosystem.config.js requirements.txt
-
-# Backup de datos
-tar -czf backup_data.tar.gz output/ logs/
-
-# Recuperación
-tar -xzf backup_config.tar.gz
-tar -xzf backup_data.tar.gz
-pm2 restart prauto-scraper
+SV_REQUEST_DELAY=0.2
+SV_MAX_WORKERS=3
 ```
 
-### 📊 Monitoreo y Alertas
+3. Rebuild y reiniciar:
 
-#### Métricas Clave
-- Tiempo de ejecución promedio
-- Cantidad de productos procesados
-- Uso de memoria y CPU
-- Errores de conexión
-- Status de integración Odoo
-
-#### Alertas Sugeridas
 ```bash
-# Monitorear uso de memoria
-pm2 monit | grep prauto-scraper
-
-# Verificar logs de error
-grep -i error logs/scraper_$(date +%Y-%m-%d).log
-
-# Verificar ejecución reciente
-ls -la output/articulos_$(date +%Y-%m-%d).csv
+docker-compose restart scrapers-cron
 ```
 
-### 🔧 Configuración Avanzada
+---
 
-### Ajustes de Rendimiento
-El scraper se puede configurar modificando la clase `ScrapingConfig` en `main.py`:
+### ❌ Scraper se colgó / no termina
 
-```python
-@dataclass
-class ScrapingConfig:
-    base_url: str = "https://www.prautopartes.com.ar/"
-    catalog_url: str = "https://www.prautopartes.com.ar/catalogo"
-    api_url: str = "https://www.prautopartes.com.ar/api/Articulos/Buscar"
-    output_dir: str = "./output"
+**Síntoma:** La ejecución lleva más de 3 horas o se quedó trabado.
 
-    # Configuración Odoo
-    odoo_url: str = "http://localhost:8069"
-    odoo_db: str = "odoo"
-    odoo_user: str = "admin"
-    odoo_password: str = "admin"
+**Diagnóstico:**
 
-    # Ajustes de rendimiento
-    page_timeout: int = 10           # Timeout para cargar páginas
-    request_delay: float = 0.5       # Pausa entre peticiones API
-    window_size: str = "1920,1080"   # Tamaño de ventana del browser
-    send_to_odoo: bool = True        # Enviar datos directamente a Odoo
-    batch_size: int = 10             # Tamaño de lote para Odoo
-```
-
-### Escalabilidad Horizontal
 ```bash
-# Para múltiples instancias (modificar ecosystem.config.js)
-instances: 'max',  # Usar todos los CPUs disponibles
-exec_mode: 'cluster'  # Modo cluster
+# Ver si está corriendo
+docker ps | grep scrapers
 
-# Ejecutar múltiples scrapers
-pm2 start ecosystem.config.js -i max
+# Ver procesos dentro del container
+docker exec scrapers ps aux
 ```
 
-### Configuración de Scheduling
+**Solución:**
+
 ```bash
-# Modificar scheduling en ecosystem.config.js
-cron_restart: '0 */4 * * *'  # Cada 4 horas
+# Matar y reiniciar
+docker-compose restart scrapers-cron
 
-# O configurar via cron system
-crontab -e
-# Agregar: 0 */4 * * * cd /home/ubuntu/stage3-performance-lube && pm2 restart prauto-scraper
+# Ver en qué se colgó
+tail -100 logs/scrapers.log
 ```
 
-## 📝 Licencia y Términos de Uso
+**Causas comunes:**
+- Timeout de Selenium esperando elemento
+- Rate limiting extremo de Odoo
+- Página de proveedor caída
 
-Este proyecto es para uso educativo y de desarrollo. **Es responsabilidad del usuario:**
+---
 
-- Respetar los términos de servicio de PrAutoParte
-- No sobrecargar los servidores del sitio web objetivo
-- Cumplir con las políticas de robots.txt
-- Mantener confidencialidad de credenciales y datos
-- Usar el scraper de manera ética y responsable
+### ❌ No se actualizan los quants (stock = 0)
 
-**Aviso Legal:** El uso de este scraper es bajo su propio riesgo. Los desarrolladores no son responsables por el mal uso o consecuencias del uso de esta herramienta.
+**Síntoma:** Logs muestran `"No-storable saltados: 2867"`.
+
+**Causa:** Productos marcados como no almacenables en Odoo.
+
+**Verificar:**
+
+```bash
+grep "No-storable saltados" logs/scrapers.log
+```
+
+**Solución:** En Odoo, verificar que los productos tengan:
+- Tipo de Producto = `Producto Almacenable`
+- Campo `is_storable` = `True`
+
+---
+
+### ❌ Códigos no matchean (SV Scraper)
+
+**Síntoma:** Logs muestran `"No match para CÓDIGO. Resultados: [...]"`
+
+**Casos implementados:**
+
+1. **Match sin espacios:** `SA17483` = `SA 17483`
+2. **Match con sufijo "i":** `TR1145` = `TR1145i` (solo códigos que empiezan con T)
+
+**Ver en logs:**
+
+```bash
+grep "No match para" logs/scrapers.log
+```
+
+---
+
+## 📁 Estructura del Proyecto
+
+```
+stage3-performance-lube/
+├── main.py                    # PR Scraper
+├── sv_scraper_v2.py          # SV Scraper
+├── scripts/
+│   ├── update_replenishment_minmax.py
+│   └── create_replenishment_rules.py
+├── odoo_code/                # Automatizaciones para Odoo
+│   ├── v2_automatizacion_consumo_stock_scraper.py
+│   ├── v2_generacion_orden_compra_venta_scraper.py
+│   └── v2_correo_notificacion_venta_scraper.py
+├── docker-compose.yml
+├── Dockerfile
+├── .env                      # Configuración (crear desde .env.example)
+├── .env.example
+├── logs/                     # Logs de ejecución
+├── output/                   # Archivos CSV generados
+└── README.md                 # Esta documentación
+```
+
+---
+
+## 🔐 Seguridad
+
+- ⚠️ **Nunca commitear el archivo `.env`** - contiene credenciales
+- El `.env` está en `.gitignore`
+- Usar credenciales específicas con permisos mínimos en Odoo
+- Los scrapers solo tienen acceso a ubicaciones de scraping
+
+---
+
+## 🔄 Actualizaciones
+
+Para actualizar el código en producción:
+
+```bash
+# 1. Pull cambios
+cd ~/stage3-performance-lube
+git pull
+
+# 2. Rebuild containers
+docker-compose build --no-cache
+
+# 3. Reiniciar servicio
+docker-compose restart scrapers-cron
+
+# 4. Verificar que funcionó
+docker-compose logs scrapers-cron --tail 50
+```
+
+---
+
+## 🛠️ Servicios Individuales (Debug)
+
+Para correr scrapers individuales (útil para debugging):
+
+```bash
+# Solo PR Scraper
+docker-compose --profile individual run --rm pr-scraper
+
+# Solo SV Scraper
+docker-compose --profile individual run --rm sv-scraper
+
+# Solo Replenishment
+docker-compose --profile individual run --rm replenishment-minmax
+```
+
+---
+
+## 📞 Soporte
+
+Para problemas o preguntas:
+
+1. Revisar esta documentación
+2. Revisar logs en `logs/scrapers.log`
+3. Revisar sección [Troubleshooting](#-troubleshooting)
+
+---
+
+**Última actualización:** Marzo 2026
